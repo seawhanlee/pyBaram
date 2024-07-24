@@ -22,7 +22,7 @@ def chop(fn):
     return newfn
 
 
-def fuzzysort(arr, idx, dim=0, tol=1e-6):
+def fuzzysort(arr, idx, dim=0, tol=1e-10):
     # Extract our dimension and argsort
     arrd = arr[dim]
     srtdidx = sorted(idx, key=arrd.__getitem__)
