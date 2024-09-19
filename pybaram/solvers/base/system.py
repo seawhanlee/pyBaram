@@ -124,11 +124,16 @@ class BaseSystem:
                     bcsect = 'soln-bcs-{}'.format(name)
                     bctype = cfg.get(bcsect, 'type')
 
-                    # Initiate boundary interfaces
-                    bint.append(
-                        subclass_by_name(self._bcinters_cls, bctype)
-                        (be, cfg, elemap, lhs, m.group(1))
-                    )
+                    try:
+                        # Initiate boundary interfaces
+                        bint.append(
+                            subclass_by_name(self._bcinters_cls, bctype)
+                            (be, cfg, elemap, lhs, m.group(1))
+                        )
+                    except TypeError as e:
+                        print(
+                            "Wrong BC: Name: {}, Type: {}, {}".format(name, bctype, e)
+                            )
 
         return bint, vint
 
