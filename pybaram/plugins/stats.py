@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 from mpi4py import MPI
+import time
 
 from pybaram.plugins.base import BasePlugin, csv_write
 
@@ -24,7 +25,10 @@ class StatsPlugin(BasePlugin):
             if intg.mode == 'steady':
                 ele = next(iter(intg.sys.eles))
                 conservars = ele.conservars
-                header += conservars
+                header += [*conservars, 'time']
+                if intg.impl_op == 'approx-jacobian':
+                    header += ['subiter', 'subres']
+                self.t0 = time.time()
             else:
                 header += ['t', 'dt']
 
@@ -36,8 +40,13 @@ class StatsPlugin(BasePlugin):
             stats = [intg.iter]
 
             if intg.mode == 'steady':
+                # Compute time interval as millisecond unit
+                interval = (time.time() - self.t0) * 1000.0
                 resid = intg.resid / intg.resid0
-                stats += resid.tolist()
+                stats += [*resid.tolist(), interval]
+                if intg.impl_op == 'approx-jacobian':
+                    stats += [intg.subitnum, intg.subres]
+                self.t0 = time.time()
             else:
                 stats += [intg.tcurr, intg.dt]
 

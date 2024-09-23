@@ -152,9 +152,9 @@ class EulerIntInters(BaseAdvecIntInters):
                 for row in range(nfvars):
                     for col in range(nfvars):
                         jmats[lti][0, row, col, lfi, lei] = ap[row][col]
-                        jmats[lti][1, row, col, lfi, lei] = -am[row][col]
+                        jmats[lti][1, row, col, lfi, lei] = am[row][col]
                         jmats[rti][0, row, col, rfi, rei] = -am[row][col]
-                        jmats[rti][1, row, col, rfi, rei] = ap[row][col]
+                        jmats[rti][1, row, col, rfi, rei] = -ap[row][col]
 
         return self.be.make_loop(self.nfpts, comm_apj)
 
@@ -266,7 +266,7 @@ class EulerMPIInters(BaseAdvecMPIInters):
         def comm_apj(i_begin, i_end, *ufj):
             uf, jmats = ufj[:nele], ufj[nele:]
 
-            A = matrix(nfvars*nfvars, (nfvars, nfvars))
+            ap = matrix(nfvars*nfvars, (nfvars, nfvars))
 
             for idx in range(i_begin, i_end):
                 # Normal vector
@@ -277,10 +277,10 @@ class EulerMPIInters(BaseAdvecMPIInters):
                 ul = uf[lti][lfi, :, lei]
 
                 # Compute Jacobian matrix on face
-                com_aprx_jac(ul, nfi, A)
+                com_aprx_jac(ul, nfi, ap)
                 for row in range(nfvars):
                     for col in range(nfvars):
-                        jmats[lti][0, row, col, lfi, lei] = A[row][col]
+                        jmats[lti][0, row, col, lfi, lei] = ap[row][col]
 
         return self.be.make_loop(self.nfpts, comm_apj)
 
@@ -401,7 +401,7 @@ class EulerBCInters(BaseAdvecBCInters):
         def comm_apj(i_begin, i_end, *ufj):
             uf, jmats = ufj[:nele], ufj[nele:]
 
-            A = matrix(nfvars*nfvars, (nfvars, nfvars))
+            ap = matrix(nfvars*nfvars, (nfvars, nfvars))
 
             for idx in range(i_begin, i_end):
                 # Normal vector
@@ -412,10 +412,10 @@ class EulerBCInters(BaseAdvecBCInters):
                 ul = uf[lti][lfi, :, lei]
 
                 # Compute Jacobian matrix on face
-                pos_jacobian(ul, nfi, A)
+                pos_jacobian(ul, nfi, ap)
                 for row in range(nfvars):
                     for col in range(nfvars):
-                        jmats[lti][0, row, col, lfi, lei] = A[row][col]
+                        jmats[lti][0, row, col, lfi, lei] = ap[row][col]
 
         return self.be.make_loop(self.nfpts, comm_apj)
 

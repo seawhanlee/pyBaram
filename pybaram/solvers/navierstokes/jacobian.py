@@ -1,20 +1,26 @@
-def get_viscous_jacobian(name, be, cplargs):
-    return eval('make_'+name+'_jacobian')(be, cplargs)
+def get_viscous_jacobian(name, be, cplargs, sign='positive'):
+    return eval('make_'+name+'_jacobian')(be, cplargs, sign)
 
 
-def make_tlns_jacobian(be, cplargs):
+def make_tlns_jacobian(be, cplargs, sign):
     """
     Thin Layer Navier-Stokes Jacobian
-    Ref : Blazek, J. (2005)., 
-        Computational Fluid Dynamics: Principles and Applications (2nd ed.).
+    Ref : 2005, Blazek, J., 
+        "Computational Fluid Dynamics: Principles and Applications (2nd ed.)",
         Elsevier.
     """
 
     # Constants
     pr, gamma = cplargs['pr'], cplargs['gamma']
     ndims = cplargs['ndims']
+    if sign == 'positive':
+        op = 1.0
+    elif sign == 'negative':
+        op = -1.0
+    else:
+        raise ValueError("Wrong sign of viscous jacobian")
     
-    def tlns2d(uf, nf, A, mu, rcp_dx, op):
+    def tlns2d(uf, nf, A, mu, rcp_dx):
         # Basic variables
         nx = nf[0]
         ny = nf[1]
@@ -40,18 +46,18 @@ def make_tlns_jacobian(be, cplargs):
 
         # Computation
         mu *= op*rcp_dx*inv_rho
-        A[1][0] += mu*b21
-        A[1][1] += mu*a1
-        A[1][2] += mu*a2
-        A[2][0] += mu*b31
-        A[2][1] += mu*a2
-        A[2][2] += mu*a3
-        A[3][0] += mu*b41
-        A[3][1] += mu*b42
-        A[3][2] += mu*b43
-        A[3][3] += mu*a4
+        A[1, 0] += mu*b21
+        A[1, 1] += mu*a1
+        A[1, 2] += mu*a2
+        A[2, 0] += mu*b31
+        A[2, 1] += mu*a2
+        A[2, 2] += mu*a3
+        A[3, 0] += mu*b41
+        A[3, 1] += mu*b42
+        A[3, 2] += mu*b43
+        A[3, 3] += mu*a4
 
-    def tlns3d(uf, nf, A, mu, rcp_dx, op):
+    def tlns3d(uf, nf, A, mu, rcp_dx):
         # Basic variables
         nx = nf[0]
         ny = nf[1]
@@ -84,23 +90,23 @@ def make_tlns_jacobian(be, cplargs):
 
         # Computation
         mu *= op*rcp_dx*inv_rho
-        A[1][0] += mu*b21
-        A[1][1] += mu*a1
-        A[1][2] += mu*a2
-        A[1][3] += mu*a3
-        A[2][0] += mu*b31
-        A[2][1] += mu*a2
-        A[2][2] += mu*a4
-        A[2][3] += mu*a5
-        A[3][0] += mu*b41
-        A[3][1] += mu*a3
-        A[3][2] += mu*a5
-        A[3][3] += mu*a6
-        A[4][0] += mu*b51
-        A[4][1] += mu*b52
-        A[4][2] += mu*b53
-        A[4][3] += mu*b54
-        A[4][4] += mu*a7
+        A[1, 0] += mu*b21
+        A[1, 1] += mu*a1
+        A[1, 2] += mu*a2
+        A[1, 3] += mu*a3
+        A[2, 0] += mu*b31
+        A[2, 1] += mu*a2
+        A[2, 2] += mu*a4
+        A[2, 3] += mu*a5
+        A[3, 0] += mu*b41
+        A[3, 1] += mu*a3
+        A[3, 2] += mu*a5
+        A[3, 3] += mu*a6
+        A[4, 0] += mu*b51
+        A[4, 1] += mu*b52
+        A[4, 2] += mu*b53
+        A[4, 3] += mu*b54
+        A[4, 4] += mu*a7
 
     if ndims == 2:
         return be.compile(tlns2d)
@@ -108,7 +114,7 @@ def make_tlns_jacobian(be, cplargs):
         return be.compile(tlns3d)
 
 
-def make_approximate_jacobian(be, cplargs):
+def make_approximate_jacobian(be, cplargs, sign):
     """
     Spectral radius on diagonal element
     """
@@ -116,19 +122,25 @@ def make_approximate_jacobian(be, cplargs):
     # Constants
     pr, gamma = cplargs['pr'], cplargs['gamma']
     nfvars = cplargs['nfvars']
+    if sign == 'positive':
+        op = 1.0
+    elif sign == 'negative':
+        op = -1.0
+    else:
+        raise ValueError("Wrong sign of viscous jacobian")
 
-    def visjacobian(uf, nf, A, mu, rcp_dx, op):
+    def visjacobian(uf, nf, A, mu, rcp_dx):
         rho = uf[0]
 
         lam = op*rcp_dx/rho * max(4/3, gamma)*mu/pr
 
         for idx in range(nfvars):
-            A[idx][idx] += lam
+            A[idx, idx] += lam
 
     return be.compile(visjacobian)
 
 
-def make_none_jacobian(be, cplargs):
+def make_none_jacobian(be, cplargs, sign):
     """
     No viscous flux Jacobian
     """

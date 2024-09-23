@@ -192,8 +192,10 @@ class RANSIntInters(BaseAdvecDiffIntInters):
         # Get Jacobian functions
         pos_jacobian = make_convective_jacobian(self.be, cplargs, 'positive')
         neg_jacobian = make_convective_jacobian(self.be, cplargs, 'negative')
-        vis_jacobian = get_viscous_jacobian(vistype, self.be, cplargs)
-        turb_jacobian = self.ele0.make_turb_jacobian()
+        vis_pos_jacobian = get_viscous_jacobian(vistype, self.be, cplargs, 'positive')
+        vis_neg_jacobian = get_viscous_jacobian(vistype, self.be, cplargs, 'negative')
+        turb_pos_jacobian = self.ele0.make_turb_jacobian('positive')
+        turb_neg_jacobian = self.ele0.make_turb_jacobian('negative')
 
         # Temporal array & matrix
         array = self.be.local_array()
@@ -207,7 +209,8 @@ class RANSIntInters(BaseAdvecDiffIntInters):
                 um = array(nvars)
                 ap = matrix(nfvars*nfvars, (nfvars, nfvars))
                 am = matrix(nfvars*nfvars, (nfvars, nfvars))
-                at = matrix(ntvars*ntvars, (ntvars, ntvars))
+                tap = matrix(ntvars*ntvars, (ntvars, ntvars))
+                tam = matrix(ntvars*ntvars, (ntvars, ntvars))
 
                 # Normal vector
                 nfi = nf[:, idx]
@@ -228,15 +231,15 @@ class RANSIntInters(BaseAdvecDiffIntInters):
                 pos_jacobian(ul, nfi, ap)
                 neg_jacobian(ur, nfi, am)
 
-                vis_jacobian(ul, nfi, ap, mu, rcp_dxi, 1.0)
-                vis_jacobian(ur, nfi, am, mu, rcp_dxi, -1.0)
+                vis_pos_jacobian(ul, nfi, ap, mu, rcp_dxi)
+                vis_neg_jacobian(ur, nfi, am, mu, rcp_dxi)
 
                 for row in range(nfvars):
                     for col in range(nfvars):
                         jmats[lti][0, row, col, lfi, lei] = ap[row][col]
-                        jmats[lti][1, row, col, lfi, lei] = -am[row][col]
+                        jmats[lti][1, row, col, lfi, lei] = am[row][col]
                         jmats[rti][0, row, col, rfi, rei] = -am[row][col]
-                        jmats[rti][1, row, col, rfi, rei] = ap[row][col]
+                        jmats[rti][1, row, col, rfi, rei] = -ap[row][col]
                 
                 # Turbulent Jacobian
                 gf = gradf[:, :, idx]
@@ -244,11 +247,15 @@ class RANSIntInters(BaseAdvecDiffIntInters):
                 for jdx in range(nvars):
                     um[jdx] = 0.5*(ul[jdx] + ur[jdx])
                 
-                turb_jacobian(um, nfi, at, rcp_dxi, mu, mut, gf, ydnsi)
+                turb_pos_jacobian(um, nfi, tap, rcp_dxi, mu, mut, gf, ydnsi)
+                turb_neg_jacobian(um, nfi, tam, rcp_dxi, mu, mut, gf, ydnsi)
+
                 for row in range(ntvars):
                     for col in range(ntvars):
-                        tjmats[lti][0, row, col, lfi, lei] = at[row][col]
-                        tjmats[rti][0, row, col, rfi, rei] = at[row][col]
+                        tjmats[lti][0, row, col, lfi, lei] = tap[row][col]
+                        tjmats[lti][1, row, col, lfi, lei] = tam[row][col]
+                        tjmats[rti][0, row, col, rfi, rei] = -tam[row][col]
+                        tjmats[rti][1, row, col, rfi, rei] = -tap[row][col]
 
         return self.be.make_loop(self.nfpts, comm_apj)
 
@@ -445,7 +452,7 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
                 # Compute Jacobian matrix on surface
                 # based on left/right cell
                 pos_jacobian(ul, nfi, ap)
-                vis_jacobian(ul, nfi, ap, mu, rcp_dxi, 1.0)
+                vis_jacobian(ul, nfi, ap, mu, rcp_dxi)
 
                 for row in range(nfvars):
                     for col in range(nfvars):
@@ -716,7 +723,7 @@ class RANSBCInters(BaseAdvecDiffBCInters):
                 # Compute Jacobian matrix on surface
                 # based on left/right cell
                 pos_jacobian(ul, nfi, ap)
-                vis_jacobian(ul, nfi, ap, mu, rcp_dxi, 1.0)
+                vis_jacobian(ul, nfi, ap, mu, rcp_dxi)
 
                 for row in range(nfvars):
                     for col in range(nfvars):

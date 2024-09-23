@@ -222,7 +222,7 @@ class RANSKWSSTElements(RANSElements, RANSKWSSTFluidElements):
 
         return self.be.compile(_lambdaf)
 
-    def make_turb_jacobian(self):
+    def make_turb_jacobian(self, sign='positive'):
         from pybaram.solvers.ranskwsst.turbulent import make_blendingF1
 
         # Constants
@@ -233,10 +233,19 @@ class RANSKWSSTElements(RANSElements, RANSKWSSTFluidElements):
         sigmaw1 = self._turb_coeffs['sigmaw1']
         sigmaw2 = self._turb_coeffs['sigmaw2']
 
+        # Sign operator
+        if sign == 'positive':
+            op = 1.0
+        elif sign == 'negative':
+            op = -1.0
+        else:
+            raise ValueError("Wrong sign of turbulent jacobian")
+
         # Functions
         _f1 = make_blendingF1(self.be, cplargs)
         
         # Compute turbulence Jacobian
+        # Upwind scheme applied
         def _jacobian(um, nf, A, rcp_dx, mu, mut, gf, ydnsi):
             f1 = _f1(um, gf, mu, ydnsi)
             sigk = f1*sigmak1 + (1-f1)*sigmak2
@@ -244,26 +253,25 @@ class RANSKWSSTElements(RANSElements, RANSKWSSTFluidElements):
             
             rho = um[0]
             contra = dot(um, nf, ndims, 1)/rho
+            contrap = 0.5*(contra + op*abs(contra))
 
-            A[0][0] = abs(contra) + rcp_dx*(mu + sigk*mut)/rho
+            A[0][0] = contrap + op*rcp_dx*(mu + sigk*mut)/rho
             A[0][1] = 0.0
             A[1][0] = 0.0
-            A[1][1] = abs(contra) + rcp_dx*(mu + sigw*mut)/rho
+            A[1][1] = contrap + op*rcp_dx*(mu + sigw*mut)/rho
 
         return self.be.compile(_jacobian)
 
     def make_source_jacobian(self):
         nvars = self.nvars
         betast = self._turb_coeffs['betast']
-        dsrc = self.dsrc
 
-        def _dsrc(uf, A, idx):
-            rho = uf[0]
-            k = uf[nvars-2]/rho
+        def _dsrc(uf, A, dsrc):
+            k = uf[nvars-2]/uf[0]
 
-            A[0][0] += dsrc[nvars-2][idx]
+            A[0][0] += dsrc[nvars-2]
             A[0][1] += max(betast*k, 0)
             # A[1][0] += 0.0
-            A[1][1] += dsrc[nvars-1][idx]
+            A[1][1] += dsrc[nvars-1]
 
         return self.be.compile(_dsrc)
