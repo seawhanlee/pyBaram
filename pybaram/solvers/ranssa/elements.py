@@ -197,26 +197,34 @@ class RANSSAElements(RANSElements, RANSSAFluidElements):
 
         return self.be.compile(_lambdaf)
 
-    def make_turb_jacobian(self):
+    def make_turb_jacobian(self, sign='positive'):
         ndims, nvars = self.ndims, self.nvars
         sigma = self._turb_coeffs['sigma']
 
+        if sign == 'positive':
+            op = 1.0
+        elif sign == 'negative':
+            op = -1.0
+        else:
+            raise ValueError("Wrong sign of turbulent jacobian")
+
         # Compute turbulence Jacobian
+        # Upwind scheme applied
         def _jacobian(um, nf, A, rcp_dx, mu, *args):
             rho = um[0]
             contra = dot(um, nf, ndims, 1)/rho
             nu = mu/rho
             nut = um[nvars-1]
 
-            A[0][0] = abs(contra) + rcp_dx*(nu + nut)/sigma
+            contrap = 0.5*(contra + op*abs(contra))
+            A[0][0] = contrap + op*rcp_dx*(nu + nut)/sigma
 
         return self.be.compile(_jacobian)
     
     def make_source_jacobian(self):
         nvars = self.nvars
-        dsrc = self.dsrc
 
-        def _dsrc(uf, A, idx):
-            A[0][0] += dsrc[nvars-1][idx]
+        def _dsrc(uf, A, dsrc):
+            A[0][0] += dsrc[nvars-1]
         
         return self.be.compile(_dsrc)

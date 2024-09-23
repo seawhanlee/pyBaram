@@ -36,10 +36,11 @@ class RANSElements(BaseAdvecDiffElements):
             self.fspr = np.empty((self.nface, self.neles))
             self.tfspr = np.empty_like(self.fspr)
         elif impl_op == 'approx-jacobian':
-            # Jacobian matrix (flow and turbulent model)
+            # Jacobian matrices (flow and turbulent model)
+            # 2-dimensional arrays (FVS and Upwind)
             self.jmat = np.empty((2, self.nfvars, self.nfvars, \
                                   self.nface, self.neles))
-            self.tjmat = np.empty((1, self.nturbvars, self.nturbvars, \
+            self.tjmat = np.empty((2, self.nturbvars, self.nturbvars, \
                                    self.nface, self.neles))
 
         # Update arguments of post kerenl

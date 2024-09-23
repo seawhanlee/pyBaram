@@ -2,24 +2,20 @@
 
 def make_lu_dcmp(be, nvars):
     f_txt = "def _dcmp(A):\n"
-    if nvars == 1:
-        f_txt += "    A[0][0] = 1/A[0][0]"
-        
-    else:
-        for i in range(1, nvars):
-            f_txt += "    A[{}][0] /= A[0][0]\n".format(i)
-            for j in range(1, nvars):
-                if i<=j:
-                    subtxt = "A[{}][0]*A[0][{}]".format(i,j)
-                    for k in range(1, i):
-                        subtxt += " + A[{}][{}]*A[{}][{}]".format(i,k,k,j)
-                    f_txt += "    A[{}][{}] -= ".format(i,j)+subtxt+"\n"
-                else:
-                    subtxt = "    A[{}][{}] = (A[{}][{}]".format(i,j,i,j)
-                    for k in range(j):
-                        subtxt += " - A[{}][{}]*A[{}][{}]".format(i,k,k,j)
-                    subtxt += ")/A[{}][{}]\n".format(j,j)
-                    f_txt += subtxt
+    for i in range(1, nvars):
+        f_txt += "    A[{}][0] /= A[0][0]\n".format(i)
+        for j in range(1, nvars):
+            if i<=j:
+                subtxt = "A[{}][0]*A[0][{}]".format(i,j)
+                for k in range(1, i):
+                    subtxt += " + A[{}][{}]*A[{}][{}]".format(i,k,k,j)
+                f_txt += "    A[{}][{}] -= ".format(i,j)+subtxt+"\n"
+            else:
+                subtxt = "    A[{}][{}] = (A[{}][{}]".format(i,j,i,j)
+                for k in range(j):
+                    subtxt += " - A[{}][{}]*A[{}][{}]".format(i,k,k,j)
+                subtxt += ")/A[{}][{}]\n".format(j,j)
+                f_txt += subtxt
     
     gvar = {}
     lvar = {}
@@ -31,7 +27,7 @@ def make_lu_dcmp(be, nvars):
 def make_substitution(be, nvars):
     f_txt = "def _sub(A, b):\n"
     if nvars == 1:
-        f_txt += "    b[0] *= A[0][0]"
+        f_txt += "    b[0] /= A[0][0]"
 
     else:
         # Forward substitution

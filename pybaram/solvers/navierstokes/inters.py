@@ -150,7 +150,8 @@ class NavierStokesIntInters(BaseAdvecDiffIntInters):
         # Get Jacobian functions
         pos_jacobian = make_convective_jacobian(self.be, cplargs, 'positive')
         neg_jacobian = make_convective_jacobian(self.be, cplargs, 'negative')
-        vis_jacobian = get_viscous_jacobian(vistype, self.be, cplargs)
+        vis_pos_jacobian = get_viscous_jacobian(vistype, self.be, cplargs, 'positive')
+        vis_neg_jacobian = get_viscous_jacobian(vistype, self.be, cplargs, 'negative')
 
         # reciprocal of distance between two cells
         rcp_dx = self._rcp_dx
@@ -184,16 +185,16 @@ class NavierStokesIntInters(BaseAdvecDiffIntInters):
                 pos_jacobian(ul, nfi, ap)
                 neg_jacobian(ur, nfi, am)
 
-                vis_jacobian(ul, nfi, ap, mu, rcp_dxi, 1.0)
-                vis_jacobian(ur, nfi, am, mu, rcp_dxi, -1.0)
+                vis_pos_jacobian(ul, nfi, ap, mu, rcp_dxi)
+                vis_neg_jacobian(ur, nfi, am, mu, rcp_dxi)
 
                 # Compute approximate Jacobian on face
                 for row in range(nfvars):
                     for col in range(nfvars):
                         jmats[lti][0, row, col, lfi, lei] = ap[row][col]
-                        jmats[lti][1, row, col, lfi, lei] = -am[row][col]
+                        jmats[lti][1, row, col, lfi, lei] = am[row][col]
                         jmats[rti][0, row, col, rfi, rei] = -am[row][col]
-                        jmats[rti][1, row, col, rfi, rei] = ap[row][col]
+                        jmats[rti][1, row, col, rfi, rei] = -ap[row][col]
 
         return self.be.make_loop(self.nfpts, comm_apj)
 
@@ -357,7 +358,7 @@ class NavierStokesMPIInters(BaseAdvecDiffMPIInters):
 
                 # Compute Jacobian matrix on surface
                 pos_jacobian(ul, nfi, ap)
-                vis_jacobian(ul, nfi, ap, mu, rcp_dxi, 1.0)
+                vis_jacobian(ul, nfi, ap, mu, rcp_dxi)
 
                 # Compute approximate Jacobian on face
                 for row in range(nfvars):
@@ -533,7 +534,7 @@ class NavierStokesBCInters(BaseAdvecDiffBCInters):
 
                 # Compute Jacobian matrix on surface
                 pos_jacobian(ul, nfi, ap)
-                vis_jacobian(ul, nfi, ap, mu, rcp_dxi, 1.0)
+                vis_jacobian(ul, nfi, ap, mu, rcp_dxi)
 
                 # Compute approximate Jacobian on face
                 for row in range(nfvars):
