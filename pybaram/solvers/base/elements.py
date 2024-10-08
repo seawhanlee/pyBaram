@@ -34,7 +34,13 @@ class BaseElements:
 
     def coloring(self):
         try:
-            color = self._coloring_nx()
+            # Greedy coloring
+            strategy = self.cfg.get('solver-time-integrator', 'coloring', 'none')
+
+            if strategy == 'none':
+                color = self._coloring_greedy()
+            else:
+                color = self._coloring_nx(strategy)
         except:
             color = self._coloring_greedy()
 
@@ -44,8 +50,7 @@ class BaseElements:
 
         return ncolor, icolor, color
 
-    def _coloring_nx(self):
-        from scipy import sparse
+    def _coloring_nx(self, strategy):
         import networkx as nx
 
         # Multi-Coloring (greedy)
@@ -53,23 +58,26 @@ class BaseElements:
         indptr  = graph['indptr']
         indices = graph['indices']
 
-        # Build adjacent array (CSR)
-        n = len(indptr) - 1
-        adj =sparse.csr_array((np.ones_like(indices), indices, indptr), shape=(n,n))
-
         # Build graph
-        G = nx.from_scipy_sparse_array(adj)
+        G = nx.Graph()
+
+        # Add connectivity (edge)
+        for row in range(len(indptr) - 1):
+            start = indptr[row]
+            end = indptr[row] + 1
+            cols = indices[start:end]
+
+            for col in cols:
+                G.add_edge(row, col)
 
         # Greedy coloring
-        strategy = self.cfg.get('solver-time-integrator', 'coloring', 'largest_first')
         col_dict = nx.greedy_color(G, strategy=strategy)
         color = np.array([col_dict[k] for k in sorted(col_dict)]) + 1
 
-        return color        
+        return color       
 
     def _coloring_greedy(self):
         # Multi-Coloring (greedy)
-        #TODO: Check computing cost (pure python implementation)
         graph = self.graph
         indptr  = graph['indptr']
         indices = graph['indices']

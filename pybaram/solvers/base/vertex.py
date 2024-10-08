@@ -25,9 +25,6 @@ class BaseVertex:
         self._construct_vcon(elemap, vtx, ivtx)
 
     def _construct_vcon(self, elemap, vtx, ivtx):
-        # Read vertex
-        vtx = np.array(vtx, dtype='U4,i4,i1,i1')
-
         # Sort vertex w.r.t (etype, vidx, eidx)
         idx = np.lexsort([vtx['f2'], vtx['f1'], vtx['f0']])
 
@@ -56,4 +53,8 @@ class BaseVertex:
     def _get_index(self, elemap, vtx):
         # Parse index of vertex
         cell_nums = {c: i for i, c in enumerate(elemap)}
-        return np.array([[cell_nums[t], e, v] for t, e, v, z in vtx]).T.copy()
+        cell_numsf = np.vectorize(cell_nums.get)
+        typx = cell_numsf(vtx['f0'])
+        
+        eidx, vidx = vtx['f1'], vtx['f2']
+        return np.array([typx, eidx, vidx])

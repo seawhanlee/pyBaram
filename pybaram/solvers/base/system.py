@@ -86,7 +86,7 @@ class BaseSystem:
 
     def load_int_inters(self, msh, be, cfg, rank, elemap):
         key = 'con_p{0}'.format(rank)
-        lhs, rhs = msh[key].astype('U4,i4,i1,i1').tolist()
+        lhs, rhs = msh[key].astype('U4,i4,i1,i1')
         iint = self._intinters_cls(be, cfg, elemap, lhs, rhs)
 
         return iint
@@ -98,7 +98,7 @@ class BaseSystem:
             m = re.match(r'con_p{}p(\d+)$'.format(rank), key)
 
             if m:
-                lhs = msh[m.group(0)].astype('U4,i4,i1,i1').tolist()
+                lhs = msh[m.group(0)].astype('U4,i4,i1,i1')
                 mpiint.append(self._mpiinters_cls(
                     be, cfg, elemap, lhs, int(m.group(1))))
         return mpiint
@@ -111,7 +111,7 @@ class BaseSystem:
             m = re.match(r'bcon_([a-z_\d]+)_p{}$'.format(rank), key)
 
             if m:
-                lhs = msh[m.group(0)].astype('U4,i4,i1,i1').tolist()
+                lhs = msh[m.group(0)].astype('U4,i4,i1,i1')
                 name = m.group(1)
 
                 if name.startswith('_virtual_'):
@@ -147,7 +147,7 @@ class BaseSystem:
                 p = int(m.group(1))
                 nei_vtx.update({p: msh[key]})
 
-        vtx = msh['vtx_p{}'.format(rank)].astype('U4,i4,i1,i1').tolist()
+        vtx = msh['vtx_p{}'.format(rank)].astype('U4,i4,i1,i1')
         ivtx = msh['ivtx_p{}'.format(rank)]
         vertex = self._vertex_cls(be, cfg, elemap, vtx, ivtx, nei_vtx)
 
