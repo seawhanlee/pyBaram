@@ -62,8 +62,13 @@ class RANSElements(BaseAdvecDiffElements):
     def _wall_distance(self, xw, wdist):
         # Compute wall distance
         try:
-            # KDtree version (require scipy)
-            self._wall_distance_kdtree(xw, wdist)
+            # KDtree version 
+            try:
+                # pykdtree
+                self._wall_distance_kdtree_pykdtree(xw, wdist)
+            except:
+                # Scipy
+                self._wall_distance_kdtree_scipy(xw, wdist)
         except:
             # Brute-force version
             self._wall_distance_bf(xw, wdist)
@@ -107,7 +112,7 @@ class RANSElements(BaseAdvecDiffElements):
 
         self.be.make_loop(ne, _cal_wdist)(wdist)
     
-    def _wall_distance_kdtree(self, xw, wdist):
+    def _wall_distance_kdtree_scipy(self, xw, wdist):
         from scipy.spatial import KDTree
         
         # Build Tree data
@@ -122,6 +127,19 @@ class RANSElements(BaseAdvecDiffElements):
         # Compute wall distance from KDtree
         wdist[:] = np.average(tree.query(self.eles, workers=workers)[0], axis=0)
         
+        # Delete tree
+        del(tree)
+
+    def _wall_distance_kdtree_pykdtree(self, xw, wdist):
+        from pykdtree.kdtree import KDTree
+
+        # Build Tree data
+        tree = KDTree(xw)
+
+        # Compute wall distance from KDtree
+        d, i = tree.query(self.eles.reshape(-1, self.ndims))
+        wdist[:] = np.average(d.reshape(-1, self.neles), axis=0)
+
         # Delete tree
         del(tree)
 

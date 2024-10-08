@@ -25,26 +25,58 @@ class BaseInters:
         # Order of spatial discretization
         self.order = cfg.getint('solver', 'order', 1)
 
+        self._lidx = self._get_index(elemap, lhs)
+
         # Normal Vector of face
-        self._mag_snorm = self._get_fpts('_mag_snorm_fpts', elemap, lhs)[0]
-        self._vec_snorm = self._get_fpts('_vec_snorm_fpts', elemap, lhs)
+        self._mag_snorm = self._get_fpts('_mag_snorm_fpts', elemap)[0]
+        self._vec_snorm = self._get_fpts('_vec_snorm_fpts', elemap)
 
-    def _get_fpts(self, meth, elemap, lhs):
+    def _get_fpts(self, meth, elemap):
         # Get element property at face and sort it
-        arr = [getattr(elemap[t], meth)[f, e] for t, e, f, z in lhs]
-        arr = np.vstack(arr).T
-        return arr.copy()
+        emap = {k: getattr(ele, meth) for k, ele in elemap.items()}
+        arr0 = getattr(self.ele0, meth)[0,0]
+        try:
+            ndim = arr0.shape[0]
+        except:
+            ndim = 1
+    
+        arr = np.empty((ndim, self.nfpts), dtype=arr0.dtype)
 
-    def _get_upts(self, meth, elemap, lhs):
+        lidx = self._lidx
+        for k, ele in enumerate(elemap):
+           idx = (lidx[0] == k)
+           eidx, fidx = lidx[1, idx], lidx[2, idx]
+           arr[:, idx] = emap[ele][fidx, eidx].T
+
+        return arr
+
+    def _get_upts(self, meth, elemap):
         # Get element property and sort it
-        arr = [getattr(elemap[t], meth)[e] for t, e, f, z in lhs]
-        arr = np.vstack(arr).T
-        return arr.copy()
+        emap = {k: getattr(ele, meth) for k, ele in elemap.items()}
+        arr0 = getattr(self.ele0, meth)[0]
+        try:
+            ndim = arr0.shape[0]
+        except:
+            ndim = 1
+    
+        arr = np.empty((ndim, self.nfpts), dtype=arr0.dtype)
+
+        lidx = self._lidx
+        for k, ele in enumerate(elemap):
+           idx = (lidx[0] == k)
+           eidx = lidx[1, idx]
+           arr[:, idx] = emap[ele][eidx].T
+
+        return arr
 
     def _get_index(self, elemap, lhs):
         # Parse index of elements and make index of each face point
         cell_nums = {c: i for i, c in enumerate(elemap)}
-        return np.array([[cell_nums[t], e, f] for t, e, f, z in lhs]).T.copy()
+        cell_numsf = np.vectorize(cell_nums.get)
+        typx = cell_numsf(lhs['f0'])
+
+        eidx, fidx = lhs['f1'], lhs['f2']
+        return np.vstack([typx, eidx, fidx])
     
     @property
     @fc.lru_cache()
@@ -52,11 +84,11 @@ class BaseInters:
         return 1/np.linalg.norm(self._dx_adj, axis=0)
 
 
-class BaseIntInters(BaseInters):
+class BaseIntInters(BaseInters):  
     def __init__(self, be, cfg, elemap, lhs, rhs):
         super().__init__(be, cfg, elemap, lhs)
 
-        self._lidx = self._get_index(elemap, lhs)
+        #self._lidx = self._get_index(elemap, lhs)
         self._ridx = self._get_index(elemap, rhs)
 
         if self.order > 1:
@@ -94,10 +126,6 @@ class BaseIntInters(BaseInters):
         self.be.make_loop(nface, compute_dxc)(self._dx_adj, *dx)
 
     def _construct_ele_graph(self, elemap, lhs, rhs):
-        # Convert lhs, rhs list to numpy array
-        lhs = np.array(lhs, dtype='U4,i4,i1,i1')
-        rhs = np.array(rhs, dtype='U4,i4,i1,i1')
-
         # Construct connectivity (fact to ele)
         con = np.hstack([[lhs, rhs], [rhs, lhs]])[['f0', 'f1', 'f2']]
 
@@ -150,7 +178,7 @@ class BaseBCInters(BaseInters):
         super().__init__(be, cfg, elemap, lhs)
         self.bctype = bctype
 
-        self._lidx = self._get_index(elemap, lhs)
+        #self._lidx = self._get_index(elemap, lhs)
 
         if self.order > 1:
             # Delx across face
@@ -158,7 +186,7 @@ class BaseBCInters(BaseInters):
             self._compute_dxc(*dxc)
 
         # Compute face center at boundary
-        self.xf = self._get_fpts('xf', elemap, lhs)
+        self.xf = self._get_fpts('xf', elemap)
 
     def _compute_dxc(self, *dx):
         nface, ndims = self.nfpts, self.ndims
@@ -192,7 +220,7 @@ class BaseVRInters(BaseInters):
         super().__init__(be, cfg, elemap, lhs)
         self.bctype = bctype
 
-        self._lidx = self._get_index(elemap, lhs)
+        #self._lidx = self._get_index(elemap, lhs)
 
         # Compute face center at boundary
         self.xf = self._get_fpts('xf', elemap, lhs)
@@ -203,7 +231,7 @@ class BaseMPIInters(BaseInters):
         super().__init__(be, cfg, elemap, lhs)
         self._dest = dest
 
-        self._lidx = self._get_index(elemap, lhs)
+        #self._lidx = self._get_index(elemap, lhs)
 
         if self.order > 1:
             # Delx = xc2 - xc1 across face
