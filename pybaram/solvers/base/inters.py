@@ -178,8 +178,6 @@ class BaseBCInters(BaseInters):
         super().__init__(be, cfg, elemap, lhs)
         self.bctype = bctype
 
-        #self._lidx = self._get_index(elemap, lhs)
-
         if self.order > 1:
             # Delx across face
             dxc = [cell.dxc for cell in elemap.values()]
@@ -220,18 +218,14 @@ class BaseVRInters(BaseInters):
         super().__init__(be, cfg, elemap, lhs)
         self.bctype = bctype
 
-        #self._lidx = self._get_index(elemap, lhs)
-
         # Compute face center at boundary
-        self.xf = self._get_fpts('xf', elemap, lhs)
+        self.xf = self._get_fpts('xf', elemap)
 
 
 class BaseMPIInters(BaseInters):
     def __init__(self, be, cfg, elemap, lhs, dest):
         super().__init__(be, cfg, elemap, lhs)
         self._dest = dest
-
-        #self._lidx = self._get_index(elemap, lhs)
 
         if self.order > 1:
             # Delx = xc2 - xc1 across face
