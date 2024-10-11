@@ -82,7 +82,7 @@ def make_tlns_jacobian(be, cplargs, sign):
         b21 = -(a1*u + a2*v + a3*w)
         b31 = -(a2*u + a4*v + a5*w)
         b41 = -(a3*u + a5*v + a6*w)
-        b51 = a7*(v2-e) - a1*u*u - a2*v*v - a6*w*w \
+        b51 = a7*(v2-e) - a1*u*u - a4*v*v - a6*w*w \
                         - 2.0*(a2*u*v + a3*u*w + a5*v*w)
         b52 = -a7*u - b21
         b53 = -a7*v - b31
