@@ -521,7 +521,7 @@ class BlockJacobi(BaseSteadyIntegrator):
 
                 _pre_tjacobi = make_tpre_jacobi(be, ele, tnv, _srcjacobian, self._tcfl_fac)
                 pre_tjacobi = Kernel(be.make_loop(ele.neles, _pre_tjacobi),
-                                     ele.upts[0], ele.dt, tdiag, ele.tjmat)
+                                     ele.upts[0], ele.dt, tdiag, ele.tjmat, ele.dsrc)
                 
                 # Turbulent sweeps and compute kernel
                 _tsweep, _tcompute = make_jacobi_sweep(be, ele, tnv)
