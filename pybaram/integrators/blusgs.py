@@ -82,6 +82,9 @@ def make_tpre_blusgs(be, ele, nv, dsrcf, factor):
     # Local matrix function
     matrix = be.local_matrix()
 
+    # LU decomposition function
+    dcmp_func = make_lu_dcmp(be, dnv)
+
     def _pre_tblusgs(i_begin, i_end, uptsb, dt, tdiag, tfjmat, dsrc):
         # Compute digonal matrix
         for idx in range(i_begin, i_end):
@@ -109,6 +112,9 @@ def make_tpre_blusgs(be, ele, nv, dsrcf, factor):
             # Complete implicit operator
             for kdx in range(dnv):
                 tmat[kdx][kdx] += 1/(dt[idx]*factor)
+
+            # LU decomposition for inverse process
+            dcmp_func(tmat)
 
             # Allocate temporal matrix to digonal array
             for row in range(dnv):
