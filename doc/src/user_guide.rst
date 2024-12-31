@@ -268,11 +268,11 @@ Time integration (or relaxation) schemes and related parameters are configured.
 
     ``eulerexplicit`` | ``tvd-rk3`` | ``rk5`` | ``lu-sgs`` | ``colored-lu-sgs`` | ``jacobi`` | ``blu-sgs`` | ``colored-blu-sgs``
 
-    * ``lu-sgs`` --- This scheme works only if disabling multi-threading layer (``single``).
+    * ``lu-sgs``, ``blu-sgs`` --- These schemes work only if disabling multi-threading layer (``single``).
 
 6. time --- initial and the last time for unsteady simulation
 
-    `float` , `float`
+    `float`, `float`
 
 7. max-iter --- the maximum iteration number for steady simulation
 
@@ -304,8 +304,9 @@ Time integration (or relaxation) schemes and related parameters are configured.
 
     `float`
 
-14. visflux-jacobian --- The computing type of viscous jacobian matrix for several implicit methods.
-    There are three options, ``tlns``, ``approximate``, and ``none``.
+14. visflux-jacobian --- The computing type of viscous Jacobian matrix for several implicit methods.
+
+    ``tlns`` | ``approximate`` | ``none``
 
     * ``tlns`` --- Based on Thin Layer Navier-Stokes equation (TLNS). Default.
 
@@ -314,8 +315,6 @@ Time integration (or relaxation) schemes and related parameters are configured.
     * ``none`` --- No viscous flux Jacobian imported. This type can cause convergence delay.
 
     * Applicable methods --- ``jacobi``, ``blu-sgs``, ``colored-blu-sgs``
-
-    `string`
 
 Example for unsteady simulation::
 
