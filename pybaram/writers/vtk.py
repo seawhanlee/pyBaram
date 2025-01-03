@@ -19,6 +19,10 @@ class VTKWriter(BaseWriter):
         vtyp = self._vtu_typ()
         soln, aux = self._soln
 
+        if self.ndims == 2:
+            # Pad zero column vector for z-dir velocity
+            soln = np.pad(soln, [(0, 1), (0, 0)])
+
         primevars = self._elms.primevars
 
         if aux is not None:
@@ -54,7 +58,7 @@ class VTKWriter(BaseWriter):
             for pv in primevars:
                 if pv == 'u':
                     off = self._write_arr_header(
-                        fp, 'Velocity', self.ndims, off, self.ndims*voff.nbytes)
+                        fp, 'Velocity', 3, off, 3*voff.nbytes)
                 elif pv in ['v', 'w']:
                     pass
                 else:
@@ -83,7 +87,7 @@ class VTKWriter(BaseWriter):
             for i, pv in enumerate(primevars):
                 if pv == 'u':
                     self._write_darray(
-                        soln[i:i+self.ndims].swapaxes(0, 1), np.float32, fp)
+                        soln[i:i+3].swapaxes(0, 1), np.float32, fp)
                 elif pv in ['v', 'w']:
                     pass
                 else:
