@@ -156,11 +156,11 @@ class BaseAdvecBCInters(BaseBCInters):
         nf = self._vec_snorm
 
         bc = self.bc
-        array = self.be.local_array()
+        array = self.be.local()
 
         def compute_delu(i_begin, i_end, *uf):
             for idx in range(i_begin, i_end):
-                ur = array(nvars)
+                ur = array((nvars,))
                 nfi = nf[:, idx]
 
                 lti, lfi, lei = lt[idx], lf[idx], le[idx]

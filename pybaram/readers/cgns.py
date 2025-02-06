@@ -66,7 +66,7 @@ class CGNSZoneReader(object):
         for idx_bc in range(nbc):
             boco = self._cgns.boco_read(zone, idx_bc)
             name = boco['name'].lower()
-            name = re.sub('\s+', '_', name)
+            name = re.sub(r'\s+', '_', name)
             bc[name] = boco['range'], boco['list']
 
         return bc

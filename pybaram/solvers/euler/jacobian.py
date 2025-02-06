@@ -7,7 +7,7 @@ def make_convective_jacobian(be, cplargs, sign):
     gamma = cplargs['gamma']
     ndims = cplargs['ndims']
     to_prim = cplargs['to_prim']
-    array = be.local_array()
+    array = be.local()
 
     # Constants
     gam1 = gamma - 1.0
@@ -34,7 +34,7 @@ def make_convective_jacobian(be, cplargs, sign):
         # Computes primitive variables
         # from conservative variables.
         rho = uf[0]
-        v = array(ndims)
+        v = array((ndims,))
         p = to_prim(uf, v)
         e = uf[ndims+1]/rho
 
@@ -54,7 +54,7 @@ def make_convective_jacobian(be, cplargs, sign):
                     ap[i, j] = 0.0
         else:
             # Computes Van Leer FVS Jacobian
-            f2 = array(ndims)
+            f2 = array((ndims,))
             rc = rho*cc
             gr = gamma*rho
 
@@ -106,7 +106,7 @@ def make_convective_jacobian(be, cplargs, sign):
 
         # Computes primitive variables
         # from conservative variables.
-        v = array(ndims)
+        v = array((ndims,))
         rho = uf[0]
         p = to_prim(uf, v)
         e = uf[ndims+1]/rho
@@ -127,7 +127,7 @@ def make_convective_jacobian(be, cplargs, sign):
             _inviscid(uf, nf, am)
         else:
             # Computes Van Leer FVS Jacobian
-            f2 = array(ndims)
+            f2 = array((ndims,))
             rc = rho*cc
             gr = gamma*rho
 
@@ -176,7 +176,7 @@ def make_inviscid_jacobian(be, cplargs):
     gamma = cplargs['gamma']
     to_prim = cplargs['to_prim']
     ndims = cplargs['ndims']
-    array = be.local_array()
+    array = be.local()
 
     gam1 = gamma - 1.0
 
@@ -197,7 +197,7 @@ def make_inviscid_jacobian(be, cplargs):
         # Computes primitive variables
         # from convservative variables.
         rho = uf[0]
-        v = array(ndims)
+        v = array((ndims,))
         p = to_prim(uf, v)
         c = np.sqrt(gamma*p/rho)
         q2 = dot(v, v, ndims)

@@ -37,7 +37,7 @@ class NavierStokesIntInters(BaseAdvecDiffIntInters):
         nf, sf = self._vec_snorm, self._mag_snorm
 
         # Compiler arguments
-        array = self.be.local_array()
+        array = self.be.local()
         cplargs = {
             'flux' : self.ele0.flux_container(),
             'to_primevars' : self.ele0.to_flow_primevars(),
@@ -57,8 +57,8 @@ class NavierStokesIntInters(BaseAdvecDiffIntInters):
 
         def comm_flux(i_begin, i_end, muf, gradf, *uf):
             for idx in range(i_begin, i_end):
-                fn = array(nfvars)
-                um = array(nfvars)
+                fn = array((nfvars,))
+                um = array((nfvars,))
 
                 # Normal vector
                 nfi = nf[:, idx]
@@ -157,15 +157,15 @@ class NavierStokesIntInters(BaseAdvecDiffIntInters):
         rcp_dx = self._rcp_dx
 
         # Temporal matrix
-        matrix = self.be.local_matrix()
+        array = self.be.local()
 
         def comm_apj(i_begin, i_end, muf, *ufj):
             uf, jmats = ufj[:nele], ufj[nele:]
 
             for idx in range(i_begin, i_end):
                 # Jacobian matrix
-                ap = matrix(nfvars*nfvars, (nfvars, nfvars))
-                am = matrix(nfvars*nfvars, (nfvars, nfvars))
+                ap = array((nfvars, nfvars))
+                am = array((nfvars, nfvars))
 
                 # Normal vector
                 nfi = nf[:, idx]
@@ -228,7 +228,7 @@ class NavierStokesMPIInters(BaseAdvecDiffMPIInters):
         nf, sf = self._vec_snorm, self._mag_snorm
 
         # Compiler arguments
-        array = self.be.local_array()
+        array = self.be.local()
         cplargs = {
             'flux' : self.ele0.flux_container(),
             'to_primevars' : self.ele0.to_flow_primevars(),
@@ -248,8 +248,8 @@ class NavierStokesMPIInters(BaseAdvecDiffMPIInters):
 
         def comm_flux(i_begin, i_end, muf, gradf, rhs, *uf):
             for idx in range(i_begin, i_end):
-                fn = array(nfvars)
-                um = array(nfvars)
+                fn = array((nfvars,))
+                um = array((nfvars,))
 
                 # Normal vector
                 nfi = nf[:, idx]
@@ -336,14 +336,14 @@ class NavierStokesMPIInters(BaseAdvecDiffMPIInters):
         rcp_dx = self._rcp_dx
 
         # Temporal matrix
-        matrix = self.be.local_matrix()
+        array = self.be.local()
 
         def comm_apj(i_begin, i_end, muf, *ufj):
             uf, jmats = ufj[:nele], ufj[nele:]
 
             for idx in range(i_begin, i_end):
                 # Jacobian matrix
-                ap = matrix(nfvars*nfvars, (nfvars, nfvars))
+                ap = array((nfvars, nfvars))
 
                 # Normal vector
                 nfi = nf[:, idx]
@@ -398,7 +398,7 @@ class NavierStokesBCInters(BaseAdvecDiffBCInters):
         nf, sf = self._vec_snorm, self._mag_snorm
 
         # Compiler arguments
-        array = self.be.local_array()
+        array = self.be.local()
         cplargs = {
             'flux' : self.ele0.flux_container(),
             'to_primevars' : self.ele0.to_flow_primevars(),
@@ -421,9 +421,9 @@ class NavierStokesBCInters(BaseAdvecDiffBCInters):
 
         def comm_flux(i_begin, i_end, muf, gradf, *uf):
             for idx in range(i_begin, i_end):
-                ur = array(nfvars)
-                um = array(nfvars)
-                fn = array(nfvars)
+                ur = array((nfvars,))
+                um = array((nfvars,))
+                fn = array((nfvars,))
 
                 # Normal vector
                 nfi = nf[:, idx]

@@ -36,14 +36,14 @@ def make_pre_jacobi(be, ele, nv, factor=1.0):
     # LU decomposition function
     dcmp_func = make_lu_dcmp(be, dnv)
 
-    # Local matrix function
-    matrix = be.local_matrix()
+    # Temporal array
+    array = be.local()
 
     def _pre_diag(i_begin, i_end, dt, diag, fjmat):
         # Compute diagonal matrix
         for idx in range(i_begin, i_end):
             # Temporal diagonal matrix
-            dmat = matrix(dnv*dnv, (dnv, dnv))
+            dmat = array((dnv, dnv))
 
             # Initialize
             for row in range(dnv):
@@ -83,13 +83,13 @@ def make_tpre_jacobi(be, ele, nv, dsrcf, factor):
     fnorm_vol = ele.mag_fnorm * ele.rcp_vol
 
     # Local matrix function
-    matrix = be.local_matrix()
+    array = be.local()
     
     def _pre_tdiag(i_begin, i_end, uptsb, dt, tdiag, tfjmat, dsrc):
         # Compute digonal matrix
         for idx in range(i_begin, i_end):
             # Allocate temporal turbulent diagonal matrix
-            tmat = matrix(dnv*dnv, (dnv, dnv))
+            tmat = array((dnv, dnv))
 
             # Initialize
             for row in range(dnv):
@@ -123,8 +123,7 @@ def make_tpre_jacobi(be, ele, nv, dsrcf, factor):
 
 def make_jacobi_sweep(be, ele, nv):
     # Local array and matrix
-    array = be.local_array()
-    matrix = be.local_matrix()
+    array = be.local()
 
     # Get element attributes
     nface = ele.nface
@@ -142,7 +141,7 @@ def make_jacobi_sweep(be, ele, nv):
     def _jacobi_sweep(i_begin, i_end, rhsb, dub, rod, fjmat):
         # Compute R-(L+U)x
         for idx in range(i_begin, i_end):
-            rhs = array(dnv)
+            rhs = array((dnv,))
 
             # Initialize rhs array with RHS
             for kdx in range(dnv):
@@ -166,8 +165,8 @@ def make_jacobi_sweep(be, ele, nv):
     def _jacobi_compute(i_begin, i_end, dub, rod, diag):
         # Compute Ax = b
         for idx in range(i_begin, i_end):
-            rhs = array(dnv)
-            dmat = matrix(dnv*dnv, (dnv, dnv))
+            rhs = array((dnv,))
+            dmat = array((dnv, dnv))
 
             for row in range(dnv):
                 for col in range(dnv):

@@ -64,9 +64,9 @@ class BaseUnsteadyIntegrator(BaseIntegrator):
         # Generate Python function for each RK stage
         f_txt =(
             f"def stage(i_begin, i_end, dt, *upts):\n"
-            f"  for idx in range(i_begin, i_end):\n"
-            f"      for j in range(nvars):\n"
-            f"          upts[{out}][j, idx] = {eq_str}"
+            f"    for idx in range(i_begin, i_end):\n"
+            f"        for j in range(nvars):\n"
+            f"            upts[{out}][j, idx] = {eq_str}"
         )
 
         kernels = []
@@ -77,7 +77,7 @@ class BaseUnsteadyIntegrator(BaseIntegrator):
             exec(f_txt, gvars, lvars)
 
             # Generate JIT kernel by looping RK stage function
-            _stage = self.be.make_loop(ele.neles, lvars['stage'])
+            _stage = self.be.make_loop(ele.neles, lvars['stage'], src=f_txt)
             kernels.append(Kernel(_stage, *ele.upts, arg_trans_pos=True))
         
         # Collect RK stage kernels for elements

@@ -47,7 +47,7 @@ class RANSIntInters(BaseAdvecDiffIntInters):
         ydist = self.ydist
 
         # Compiler arguments
-        array = self.be.local_array()
+        array = self.be.local()
         cplargs = {
             'flux' : self.ele0.flux_container(),
             'to_primevars' : self.ele0.to_flow_primevars(),
@@ -71,8 +71,8 @@ class RANSIntInters(BaseAdvecDiffIntInters):
 
         def comm_flux(i_begin, i_end, muf, gradf, *uf):
             for idx in range(i_begin, i_end):
-                fn = array(nvars)
-                um = array(nvars)
+                fn = array((nvars,))
+                um = array((nvars,))
 
                 # Normal vector and wall distance (ydns)
                 nfi = nf[:, idx]
@@ -118,7 +118,7 @@ class RANSIntInters(BaseAdvecDiffIntInters):
         rcp_dx = self._rcp_dx
 
         # Get wave speed function
-        array = self.be.local_array()
+        array = self.be.local()
         wave_speed = self.ele0.make_wave_speed()
         twave_speed = self.ele0.make_turb_wave_speed()
 
@@ -127,7 +127,7 @@ class RANSIntInters(BaseAdvecDiffIntInters):
             lam, tlam = _lam[:nele], _lam[nele:]
 
             for idx in range(i_begin, i_end):
-                um = array(nvars)
+                um = array((nvars,))
 
                 # Normal vector
                 nfi = nf[:, idx]
@@ -198,19 +198,18 @@ class RANSIntInters(BaseAdvecDiffIntInters):
         turb_neg_jacobian = self.ele0.make_turb_jacobian('negative')
 
         # Temporal array & matrix
-        array = self.be.local_array()
-        matrix = self.be.local_matrix()
+        array = self.be.local()
 
         def comm_apj(i_begin, i_end, muf, gradf, *ufj):
             uf, _jmats = ufj[:nele], ufj[nele:]
             jmats, tjmats = _jmats[:nele], _jmats[nele:]
 
             for idx in range(i_begin, i_end):
-                um = array(nvars)
-                ap = matrix(nfvars*nfvars, (nfvars, nfvars))
-                am = matrix(nfvars*nfvars, (nfvars, nfvars))
-                tap = matrix(ntvars*ntvars, (ntvars, ntvars))
-                tam = matrix(ntvars*ntvars, (ntvars, ntvars))
+                um = array((nvars,))
+                ap = array((nfvars, nfvars))
+                am = array((nfvars, nfvars))
+                tap = array((ntvars, ntvars))
+                tam = array((ntvars, ntvars))
 
                 # Normal vector
                 nfi = nf[:, idx]
@@ -298,7 +297,7 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
         ydist = self.ydist
 
         # Compiler arguments
-        array = self.be.local_array()
+        array = self.be.local()
         cplargs = {
             'flux' : self.ele0.flux_container(),
             'to_primevars' : self.ele0.to_flow_primevars(),
@@ -322,8 +321,8 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
 
         def comm_flux(i_begin, i_end, muf, gradf, rhs, *uf):
             for idx in range(i_begin, i_end):
-                fn = array(nvars)
-                um = array(nvars)
+                fn = array((nvars,))
+                um = array((nvars,))
 
                 # Normal vector and wall distance (ydns)
                 nfi = nf[:, idx]
@@ -427,15 +426,15 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
         turb_jacobian = self.ele0.make_turb_jacobian()
 
         # Temporal matrix
-        matrix = self.be.local_matrix()
+        array = self.be.local()
 
         def comm_apj(i_begin, i_end, muf, gradf, *ufj):
             uf, _jmats = ufj[:nele], ufj[nele:]
             jmats, tjmats = _jmats[:nele], _jmats[nele:]
 
             for idx in range(i_begin, i_end):
-                ap = matrix(nfvars*nfvars, (nfvars, nfvars))
-                at = matrix(ntvars*ntvars, (ntvars, ntvars))
+                ap = array((nfvars, nfvars))
+                at = array((ntvars, ntvars))
 
                 # Normal vector
                 nfi = nf[:, idx]
@@ -528,14 +527,14 @@ class RANSBCInters(BaseAdvecDiffBCInters):
         ydist = self.ydist
 
         # Compile functions
-        array = self.be.local_array()
+        array = self.be.local()
         compute_mu = self.ele0.mu_container()
 
         bc = self.bc
 
         def compute_delu(i_begin, i_end, *uf):
             for idx in range(i_begin, i_end):
-                ur = array(nvars)
+                ur = array((nvars,))
                 nfi = nf[:, idx]
 
                 lti, lfi, lei = lt[idx], lf[idx], le[idx]
@@ -559,7 +558,7 @@ class RANSBCInters(BaseAdvecDiffBCInters):
         ydist = self.ydist
 
         # Compiler arguments
-        array = self.be.local_array()
+        array = self.be.local()
         cplargs = {
             'flux' : self.ele0.flux_container(),
             'to_primevars' : self.ele0.to_flow_primevars(),
@@ -586,9 +585,9 @@ class RANSBCInters(BaseAdvecDiffBCInters):
 
         def comm_flux(i_begin, i_end, muf, gradf, *uf):
             for idx in range(i_begin, i_end):
-                fn = array(nvars)
-                um = array(nvars)
-                ur = array(nvars)
+                fn = array((nvars,))
+                um = array((nvars,))
+                ur = array((nvars,))
 
                 # Normal vector and wall distance (ydns)
                 nfi = nf[:, idx]
@@ -698,15 +697,15 @@ class RANSBCInters(BaseAdvecDiffBCInters):
         turb_jacobian = self.ele0.make_turb_jacobian()
 
         # Temporal matrix
-        matrix = self.be.local_matrix()
+        array = self.be.local()
 
         def comm_apj(i_begin, i_end, muf, gradf, *ufj):
             uf, _jmats = ufj[:nele], ufj[nele:]
             jmats, tjmats = _jmats[:nele], _jmats[nele:]
 
             for idx in range(i_begin, i_end):
-                ap = matrix(nfvars*nfvars, (nfvars, nfvars))
-                at = matrix(ntvars*ntvars, (ntvars, ntvars))
+                ap = array((nfvars, nfvars))
+                at = array((ntvars, ntvars))
 
                 # Normal vector
                 nfi = nf[:, idx]
