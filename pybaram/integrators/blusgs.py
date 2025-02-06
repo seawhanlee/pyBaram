@@ -34,13 +34,13 @@ def make_pre_blusgs(be, ele, nv, factor=1.0):
     dcmp_func = make_lu_dcmp(be, dnv)
 
     # Local matrix function
-    matrix = be.local_matrix()
+    array = be.local()
 
     def _pre_blusgs(i_begin, i_end, dt, diag, fjmat):
         # Compute digonal matrix
         for idx in range(i_begin, i_end):
             # Temporal diagonal matrix
-            dmat = matrix(dnv*dnv, (dnv, dnv))
+            dmat = array((dnv, dnv))
 
             # Initialize
             for row in range(dnv):
@@ -80,7 +80,7 @@ def make_tpre_blusgs(be, ele, nv, dsrcf, factor):
     fnorm_vol = ele.mag_fnorm * ele.rcp_vol
 
     # Local matrix function
-    matrix = be.local_matrix()
+    array = be.local()
 
     # LU decomposition function
     dcmp_func = make_lu_dcmp(be, dnv)
@@ -89,7 +89,7 @@ def make_tpre_blusgs(be, ele, nv, dsrcf, factor):
         # Compute digonal matrix
         for idx in range(i_begin, i_end):
             # Allocate temporal turbulent diagonal matrix
-            tmat = matrix(dnv*dnv, (dnv, dnv))
+            tmat = array((dnv, dnv))
 
             # Initialize
             for row in range(dnv):
@@ -126,8 +126,7 @@ def make_tpre_blusgs(be, ele, nv, dsrcf, factor):
 
 def make_serial_blusgs(be, ele, nv, mapping, unmapping):
     # Local array and matrix
-    array = be.local_array()
-    matrix = be.local_matrix()
+    array = be.local()
 
     # Get element attributes
     nface = ele.nface
@@ -146,8 +145,8 @@ def make_serial_blusgs(be, ele, nv, mapping, unmapping):
         # Lower (Forward) sweep
         for _idx in range(i_begin, i_end):
             idx = mapping[_idx]
-            rhs = array(dnv)
-            dmat = matrix(dnv*dnv, (dnv, dnv))
+            rhs = array((dnv,))
+            dmat = array((dnv, dnv))
 
             for row in range(dnv):
                 for col in range(dnv):
@@ -179,8 +178,8 @@ def make_serial_blusgs(be, ele, nv, mapping, unmapping):
         # Upper (Backward) sweep
         for _idx in range(i_end-1, i_begin-1, -1):
             idx = mapping[_idx]
-            rhs = array(dnv)
-            dmat = matrix(dnv*dnv, (dnv, dnv))
+            rhs = array((dnv,))
+            dmat = array((dnv, dnv))
 
             for row in range(dnv):
                 for col in range(dnv):
@@ -213,8 +212,7 @@ def make_serial_blusgs(be, ele, nv, mapping, unmapping):
 
 def make_colored_blusgs(be, ele, nv, icolor, lcolor):
     # Make local array
-    array = be.local_array()
-    matrix = be.local_matrix()
+    array = be.local()
 
     # Get element attributes
     nface = ele.nface
@@ -234,8 +232,8 @@ def make_colored_blusgs(be, ele, nv, icolor, lcolor):
             # Lower sweep with coloring
             idx = icolor[_idx]
             curr_level = lcolor[idx]
-            rhs = array(dnv)
-            dmat = matrix(dnv*dnv, (dnv, dnv))
+            rhs = array((dnv,))
+            dmat = array((dnv, dnv))
 
             for row in range(dnv):
                 for col in range(dnv):

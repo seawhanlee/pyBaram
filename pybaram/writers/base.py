@@ -50,7 +50,7 @@ class BaseWriter(object):
         cells = defaultdict(list)
         self._ele_rank = ele_rank = []
         for k in mesh:
-            m = re.match('elm_(\S+)_p(\d+)', k)
+            m = re.match(r'elm_(\S+)_p(\d+)', k)
             if m:
                 cells[m.group(1)].append(mesh[k])
                 ele_rank.append((m.group(1), m.group(2)))

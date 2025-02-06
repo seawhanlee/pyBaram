@@ -130,11 +130,11 @@ class BaseSteadyIntegrator(BaseIntegrator):
             # Generate Python function for each RK stage
             f_txt =(
                 f"def stage(i_begin, i_end, dt, *upts):\n"
-                f"  for idx in range(i_begin, i_end):\n"
-                f"      for j in range(nfvars):\n"
-                f"          upts[{out}][j, idx] = {eqf_str}\n"
-                f"      for j in range(nfvars, nvars):\n"
-                f"          upts[{out}][j, idx] = {eqt_str}"
+                f"    for idx in range(i_begin, i_end):\n"
+                f"        for j in range(nfvars):\n"
+                f"            upts[{out}][j, idx] = {eqf_str}\n"
+                f"        for j in range(nfvars, nvars):\n"
+                f"            upts[{out}][j, idx] = {eqt_str}"
             )
         else:
             # Substitute 'dt' string as dt array
@@ -156,7 +156,7 @@ class BaseSteadyIntegrator(BaseIntegrator):
             exec(f_txt, gvars, lvars)
 
             # Generate JIT kernel by looping RK stage function
-            _stage = self.be.make_loop(ele.neles, lvars['stage'])
+            _stage = self.be.make_loop(ele.neles, lvars['stage'], src=f_txt)
             kernels.append(Kernel(_stage, ele.dt, *ele.upts))
         
         # Collect RK stage kernels for elements
@@ -562,7 +562,7 @@ class BlockJacobi(BaseSteadyIntegrator):
             drhoi = 0.0
             for ele in self.sys.eles:
                 ele.subres -= ele.upts[2][self._res_idx]
-                drhoi += sum(ele.subres**2)
+                drhoi += np.dot(ele.subres, ele.subres)
                 ele.subres[:] = ele.upts[2][self._res_idx]
 
             # Collect L2-norm for all domain
@@ -679,7 +679,7 @@ class BlockLUSGS(BaseSteadyIntegrator):
             drhoi = 0.0
             for ele in self.sys.eles:
                 ele.subres -= ele.upts[2][self._res_idx]
-                drhoi += sum(ele.subres**2)
+                drhoi += np.dot(ele.subres, ele.subres)
                 ele.subres[:] = ele.upts[2][self._res_idx]
 
             # Collect L2-norm for all domain
@@ -814,7 +814,7 @@ class ColoredBlockLUSGS(BaseSteadyIntegrator):
             drhoi = 0.0
             for ele in self.sys.eles:
                 ele.subres -= ele.upts[2][self._res_idx]
-                drhoi += sum(ele.subres**2)
+                drhoi += np.dot(ele.subres, ele.subres)
                 ele.subres[:] = ele.upts[2][self._res_idx]
 
             # Collect L2-norm for all domain

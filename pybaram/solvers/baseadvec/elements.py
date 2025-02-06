@@ -134,7 +134,7 @@ class BaseAdvecElements(BaseElements):
         exec(f_txt, gvars, lvars)
 
         # Compile the funtion
-        return self.be.make_loop(self.neles, lvars["_div_upts"])
+        return self.be.make_loop(self.neles, lvars["_div_upts"], src=f_txt)
 
     def _make_grad(self):
         nface, ndims, nvars = self.nface, self.ndims, self.nvars

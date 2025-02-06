@@ -10,7 +10,7 @@ def get_rsolver(name, be, cplargs):
     """
     docstring
     """
-    fname = re.sub('\+', 'p', name)
+    fname = re.sub(r'\+', 'p', name)
     fname = re.sub('-', '_', fname)
     flux = eval('make_' + fname)(cplargs)
 
@@ -23,7 +23,7 @@ def make_rusanov(cplargs):
     array = cplargs['array']
 
     def rsolver(ul, ur, nf, fn):
-        fl, fr = array(nvars), array(nvars)
+        fl, fr = array((nvars,)), array((nvars,))
         
         pl, contravl = flux(ul, nf, fl)
         pr, contravr = flux(ur, nf, fr)
@@ -43,10 +43,11 @@ def make_roe(cplargs):
     array = cplargs['array']
 
     def rsolver(ul, ur, nf, fn):
-        fl, fr = array(nvars), array(nvars)
-        vl, vr = array(ndims), array(ndims)
-        dv, va = array(ndims), array(ndims)
-        ev1, ev2, ev3 = array(nvars), array(nvars), array(nvars)
+        fl, fr = array((nvars,)), array((nvars,))
+        vl, vr = array((ndims,)), array((ndims,))
+        dv, va = array((ndims,)), array((ndims,))
+        #ev1, ev2, ev3 = array((nvars,)), array((nvars,)), array((nvars,))
+        ev = array((3, nvars))
 
         pl, contravl = flux(ul, nf, fl)
         pr, contravr = flux(ur, nf, fr)
@@ -99,22 +100,22 @@ def make_roe(cplargs):
         alp2 = drho - dp*inv_aasq
         alp3 = 0.5*(dp + ra*aa*dcontrav)*inv_aasq
         
-        ev1[0] = alp1
-        ev1[nvars-1] = alp1*(ha - aa*contrava)
+        ev[0, 0] = alp1
+        ev[0, nvars-1] = alp1*(ha - aa*contrava)
 
-        ev2[0] = alp2
-        ev2[nvars-1] = alp2*qq + ra*(dot(va, dv, ndims) - contrava*dcontrav)
+        ev[1, 0] = alp2
+        ev[1, nvars-1] = alp2*qq + ra*(dot(va, dv, ndims) - contrava*dcontrav)
 
-        ev3[0] = alp3
-        ev3[nvars-1] = alp3*(ha + aa*contrava)
+        ev[2, 0] = alp3
+        ev[2, nvars-1] = alp3*(ha + aa*contrava)
 
         for jdx in range(ndims):
-            ev1[1+jdx] = alp1*(va[jdx] - aa*nf[jdx])
-            ev2[1+jdx] = alp2*va[jdx] + ra*(dv[jdx] - nf[jdx]*dcontrav)
-            ev3[1+jdx] = alp3*(va[jdx] + aa*nf[jdx])
+            ev[0, 1+jdx] = alp1*(va[jdx] - aa*nf[jdx])
+            ev[1, 1+jdx] = alp2*va[jdx] + ra*(dv[jdx] - nf[jdx]*dcontrav)
+            ev[2, 1+jdx] = alp3*(va[jdx] + aa*nf[jdx])
 
         for jdx in range(nvars):
-            fn[jdx] = 0.5*(fl[jdx] + fr[jdx]) - 0.5*(l1*ev1[jdx] + l2*ev2[jdx] + l3*ev3[jdx])
+            fn[jdx] = 0.5*(fl[jdx] + fr[jdx]) - 0.5*(l1*ev[0, jdx] + l2*ev[1, jdx] + l3*ev[2, jdx])
 
     return rsolver
 
@@ -125,10 +126,10 @@ def make_roem(cplargs):
     array = cplargs['array']
 
     def rsolver(ul, ur, nf, fn):
-        fl, fr = array(nvars), array(nvars)
-        vl, vr = array(ndims), array(ndims)
-        dv, va = array(ndims), array(ndims)
-        du, bdq = array(nvars), array(nvars)
+        fl, fr = array((nvars,)), array((nvars,))
+        vl, vr = array((ndims,)), array((ndims,))
+        dv, va = array((ndims,)), array((ndims,))
+        du, bdq = array((nvars,)), array((nvars,))
 
         pl, contravl = flux(ul, nf, fl)
         pr, contravr = flux(ur, nf, fr)
@@ -210,11 +211,11 @@ def make_rotated_roem(cplargs):
     array = cplargs['array']
 
     def rsolver(ul, ur, nf, fn):
-        fl, fr = array(nvars), array(nvars)
-        vl, vr = array(ndims), array(ndims)
-        dv, va = array(ndims), array(ndims)
-        du, bdq = array(nvars), array(nvars)
-        nv = array(ndims)
+        fl, fr = array((nvars,)), array((nvars,))
+        vl, vr = array((ndims,)), array((ndims,))
+        dv, va = array((ndims,)), array((ndims,))
+        du, bdq = array((nvars,)), array((nvars,))
+        nv = array((ndims,))
 
         pl, contravl = flux(ul, nf, fl)
         pr, contravr = flux(ur, nf, fr)
@@ -328,9 +329,9 @@ def make_hlle(cplargs):
     array = cplargs['array']
 
     def rsolver(ul, ur, nf, fn):
-        fl, fr = array(nvars), array(nvars)
-        vl, vr = array(ndims), array(ndims)
-        va = array(ndims)
+        fl, fr = array((nvars,)), array((nvars,))
+        vl, vr = array((ndims,)), array((ndims,))
+        va = array((ndims,))
 
         pl, contravl = flux(ul, nf, fl)
         pr, contravr = flux(ur, nf, fr)
@@ -379,10 +380,10 @@ def make_hllem(cplargs):
     array = cplargs['array']
 
     def rsolver(ul, ur, nf, fn):
-        fl, fr = array(nvars), array(nvars)
-        vl, vr = array(ndims), array(ndims)
-        dv, va = array(ndims), array(ndims)
-        df = array(nvars)
+        fl, fr = array((nvars,)), array((nvars,))
+        vl, vr = array((ndims,)), array((ndims,))
+        dv, va = array((ndims,)), array((ndims,))
+        df = array((ndims,))
 
         pl, contravl = flux(ul, nf, fl)
         pr, contravr = flux(ur, nf, fr)
@@ -459,7 +460,7 @@ def make_ausmpwp(cplargs):
     alpha = 3/16
 
     def rsolver(ul, ur, nf, fn):
-        vl, vr = array(ndims), array(ndims)
+        vl, vr = array((ndims,)), array((ndims,))
         pl = to_primevars(ul, vl)
         pr = to_primevars(ur, vr)
 
@@ -552,7 +553,7 @@ def make_ausmpup(cplargs):
     kp, ku = 1, 1
 
     def rsolver(ul, ur, nf, fn):
-        vl, vr = array(ndims), array(ndims)
+        vl, vr = array((ndims,)), array((ndims,))
         pl = to_primevars(ul, vl)
         pr = to_primevars(ur, vr)
 

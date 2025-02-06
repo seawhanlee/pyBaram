@@ -33,7 +33,7 @@ class EulerIntInters(BaseAdvecIntInters):
         nf, sf = self._vec_snorm, self._mag_snorm
 
         # Compiler arguments
-        array = self.be.local_array()
+        array = self.be.local()
         cplargs = {
             'flux' : self.ele0.flux_container(),
             'to_primevars' : self.ele0.to_flow_primevars(),
@@ -49,7 +49,7 @@ class EulerIntInters(BaseAdvecIntInters):
 
         def comm_flux(i_begin, i_end, *uf):
             for idx in range(i_begin, i_end):
-                fn = array(nfvars)
+                fn = array((nfvars,))
 
                 # Normal vector
                 nfi = nf[:, idx]
@@ -124,7 +124,7 @@ class EulerIntInters(BaseAdvecIntInters):
         neg_jacobian = make_convective_jacobian(self.be, cplargs, 'negative')
 
         # Temporal matrix
-        matrix = self.be.local_matrix()
+        array = self.be.local()
 
         def comm_apj(i_begin, i_end, *ufj):
             uf, jmats = ufj[:nele], ufj[nele:]
@@ -134,8 +134,8 @@ class EulerIntInters(BaseAdvecIntInters):
                 nfi = nf[:, idx]
 
                 # Jacobian matrix
-                ap = matrix(nfvars*nfvars, (nfvars, nfvars))
-                am = matrix(nfvars*nfvars, (nfvars, nfvars))
+                ap = array((nfvars, nfvars))
+                am = array((nfvars, nfvars))
 
                 # Left and right solutions
                 lti, lfi, lei = lt[idx], lf[idx], le[idx]
@@ -184,7 +184,7 @@ class EulerMPIInters(BaseAdvecMPIInters):
         nf, sf = self._vec_snorm, self._mag_snorm
 
         # Compiler arguments
-        array = self.be.local_array()
+        array = self.be.local()
         cplargs = {
             'flux' : self.ele0.flux_container(),
             'to_primevars' : self.ele0.to_flow_primevars(),
@@ -200,7 +200,7 @@ class EulerMPIInters(BaseAdvecMPIInters):
 
         def comm_flux(i_begin, i_end, rhs, *uf):
             for idx in range(i_begin, i_end):
-                fn = array(nfvars)
+                fn = array((nfvars,))
 
                 # Normal vector
                 nfi = nf[:, idx]
@@ -261,14 +261,14 @@ class EulerMPIInters(BaseAdvecMPIInters):
         com_aprx_jac = make_convective_jacobian(self.be, cplargs, 'positive')
 
         # Temporal matrix
-        matrix = self.be.local_matrix()
+        array = self.be.local()
 
         def comm_apj(i_begin, i_end, *ufj):
             uf, jmats = ufj[:nele], ufj[nele:]
 
-            ap = matrix(nfvars*nfvars, (nfvars, nfvars))
-
             for idx in range(i_begin, i_end):
+                ap = array((nfvars, nfvars))
+                
                 # Normal vector
                 nfi = nf[:, idx]
 
@@ -310,7 +310,7 @@ class EulerBCInters(BaseAdvecBCInters):
         ndims, nfvars = self.ndims, self.nfvars
 
         # Compiler arguments
-        array = self.be.local_array()
+        array = self.be.local()
         cplargs = {
             'flux' : self.ele0.flux_container(),
             'to_primevars' : self.ele0.to_flow_primevars(),
@@ -332,8 +332,8 @@ class EulerBCInters(BaseAdvecBCInters):
 
         def bc_flux(i_begin, i_end, *uf):
             for idx in range(i_begin, i_end):
-                fn = array(nfvars)
-                ur = array(nfvars)
+                fn = array((nfvars,))
+                ur = array((nfvars,))
 
                 # Normal vector
                 nfi = nf[:, idx]
@@ -396,14 +396,14 @@ class EulerBCInters(BaseAdvecBCInters):
         pos_jacobian = make_convective_jacobian(self.be, cplargs, 'positive')
 
         # Temporal matrix
-        matrix = self.be.local_matrix()
+        array = self.be.local()
 
         def comm_apj(i_begin, i_end, *ufj):
             uf, jmats = ufj[:nele], ufj[nele:]
 
-            ap = matrix(nfvars*nfvars, (nfvars, nfvars))
-
             for idx in range(i_begin, i_end):
+                ap = array((nfvars, nfvars))
+
                 # Normal vector
                 nfi = nf[:, idx]
 

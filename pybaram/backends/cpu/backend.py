@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 from pybaram.backends import Backend
 from pybaram.backends.cpu.loop import make_serial_loop1d, make_parallel_loop1d
-from pybaram.backends.cpu.local import stack_empty_impl
-
+from pybaram.backends.cpu.local import stack_empty
 from numba.extending import register_jitable
 
 import numba as nb
@@ -42,29 +41,18 @@ class CPUBackend(Backend):
         else:
             # Enable Numba parallelization if the function is not nested
             return nb.jit(nopython=True, fastmath=True, parallel=True)(func)
-
-    def local_array(self):
-        # Stack-allocated array
-        # Original code from https://github.com/numba/numba/issues/5084
-        # Modified for only 1-D array
-        
-        np_dtype = np.float64
-
-        @register_jitable(inline='always')
-        def stack_empty(size, dtype=np_dtype):
-            arr_ptr=stack_empty_impl(size, dtype)
-            arr=nb.carray(arr_ptr, (size,))
-            return arr
-
-        return stack_empty
-
-    def local_matrix(self):
+    
+    def local(self):
         np_dtype = np.float64
 
         @register_jitable
-        def stack_empty(size, shape, dtype=np_dtype):
-            arr_ptr = stack_empty_impl(size, dtype)
-            arr = nb.carray(arr_ptr, shape)
+        def _array(shape, dtype=np_dtype):
+            # Compute size of shape
+            size = 1
+            for i in range(len(shape)):
+                size *= shape[i]
+
+            arr = stack_empty(size, shape, dtype=dtype)
             return arr
         
-        return stack_empty
+        return _array
