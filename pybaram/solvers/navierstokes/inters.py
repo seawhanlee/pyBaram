@@ -512,14 +512,14 @@ class NavierStokesBCInters(BaseAdvecDiffBCInters):
         rcp_dx = self._rcp_dx
 
         # Temporal matrix
-        matrix = self.be.local_matrix()
+        array = self.be.local()
 
         def comm_apj(i_begin, i_end, muf, *ufj):
             uf, jmats = ufj[:nele], ufj[nele:]
 
             for idx in range(i_begin, i_end):
                 # Jacobian matrix
-                ap = matrix(nfvars*nfvars, (nfvars, nfvars))
+                ap = array((nfvars, nfvars))
 
                 # Normal vector
                 nfi = nf[:, idx]
