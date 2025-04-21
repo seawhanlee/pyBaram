@@ -489,6 +489,8 @@ The `stats` plugin writes a fundamental log file. For unsteady simulations, it i
 
 1. ``flushsteps`` --- flush to file for every `flushstep`. Default value is 500.
 
+2. ``name`` --- file name. If a file format is not assigned, `csv` format will be used by default. Default name is `stats.csv`
+
 Examples::
     
     [soln-plugin-stats]
