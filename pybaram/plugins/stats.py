@@ -13,12 +13,14 @@ class StatsPlugin(BasePlugin):
 
         sect = 'soln-plugin-{}'.format(self.name)
         self.flushsteps = cfg.getint(sect, 'flushsteps', 500)
+        fname = cfg.get(sect, 'name', 'stats.csv')
 
         # Get rank
         self._rank = rank = MPI.COMM_WORLD.rank
         if rank == 0:
             # Out file name and header
-            fname = "stats.csv"
+            if not fname.endswith('.csv'):
+                fname += '.csv'
             header = ['iter']
 
             # Make header
