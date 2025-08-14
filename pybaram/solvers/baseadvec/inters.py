@@ -10,11 +10,11 @@ import re
 class BaseAdvecIntInters(BaseIntInters):
     def construct_kernels(self, elemap):
         # View of elemenet array
-        self._fpts = fpts = [cell.fpts for cell in elemap.values()]
+        self._fpts = fpts = tuple(cell.fpts for cell in elemap.values())
 
         if self.order > 1:
             # Kernel to compute differnce of solution at face
-            self.compute_delu = Kernel(self._make_delu(), *fpts)
+            self.compute_delu = Kernel(self._make_delu(), fpts)
         else:
             self.compute_delu = NullKernel
 
@@ -23,7 +23,7 @@ class BaseAdvecIntInters(BaseIntInters):
         lt, le, lf = self._lidx
         rt, re, rf = self._ridx
 
-        def compute_delu(i_begin, i_end, *uf):
+        def compute_delu(i_begin, i_end, uf):
             for idx in range(i_begin, i_end):
                 lti, lfi, lei = lt[idx], lf[idx], le[idx]
                 rti, rfi, rei = rt[idx], rf[idx], re[idx]
@@ -47,16 +47,16 @@ class BaseAdvecMPIInters(BaseMPIInters):
         self._rhs = rhs = np.empty((self.nvars, self.nfpts))
 
         # View of elemenet array
-        self._fpts = fpts = [cell.fpts for cell in elemap.values()]
+        self._fpts = fpts = tuple(cell.fpts for cell in elemap.values())
 
         if self.order > 1:
             # Kernel to compute differnce of solution at face
-            self.compute_delu = Kernel(self._make_delu(), rhs, *fpts)
+            self.compute_delu = Kernel(self._make_delu(), rhs, fpts)
         else:
             self.compute_delu = NullKernel
 
         # Kernel for pack, send, receive
-        self.pack = Kernel(self._make_pack(), lhs, *fpts)
+        self.pack = Kernel(self._make_pack(), lhs, fpts)
         self.send, self.sreq = self._make_send(lhs)
         self.recv, self.rreq = self._make_recv(rhs)
 
@@ -64,7 +64,7 @@ class BaseAdvecMPIInters(BaseMPIInters):
         nvars = self.nvars
         lt, le, lf = self._lidx
 
-        def compute_delu(i_begin, i_end, rhs, *uf):
+        def compute_delu(i_begin, i_end, rhs, uf):
             for idx in range(i_begin, i_end):
                 lti, lfi, lei = lt[idx], lf[idx], le[idx]
 
@@ -80,7 +80,7 @@ class BaseAdvecMPIInters(BaseMPIInters):
         nvars = self.nvars
         lt, le, lf = self._lidx
 
-        def pack(i_begin, i_end, lhs, *uf):
+        def pack(i_begin, i_end, lhs, uf):
             for idx in range(i_begin, i_end):
                 lti, lfi, lei = lt[idx], lf[idx], le[idx]
 
@@ -142,11 +142,11 @@ class BaseAdvecBCInters(BaseBCInters):
         self.construct_bc()
 
         # View of elemenet array
-        self._fpts = fpts = [cell.fpts for cell in elemap.values()]
+        self._fpts = fpts = tuple(cell.fpts for cell in elemap.values())
 
         if self.order > 1:
             # Kernel to compute differnce of solution at face
-            self.compute_delu = Kernel(self._make_delu(), *fpts)
+            self.compute_delu = Kernel(self._make_delu(), fpts)
         else:
             self.compute_delu = NullKernel
 
@@ -158,7 +158,7 @@ class BaseAdvecBCInters(BaseBCInters):
         bc = self.bc
         array = self.be.local()
 
-        def compute_delu(i_begin, i_end, *uf):
+        def compute_delu(i_begin, i_end, uf):
             for idx in range(i_begin, i_end):
                 ur = array((nvars,))
                 nfi = nf[:, idx]

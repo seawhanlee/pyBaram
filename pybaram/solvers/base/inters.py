@@ -93,13 +93,13 @@ class BaseIntInters(BaseInters):
 
         if self.order > 1:
             # Delx = xc2 - xc1 across face
-            dxc = [cell.dxc for cell in elemap.values()]
-            self._compute_dxc(*dxc)
+            dxc = tuple(cell.dxc for cell in elemap.values())
+            self._compute_dxc(dxc)
 
         # Construct neighboring element within current Elements
         self._construct_ele_graph(elemap, lhs, rhs)
 
-    def _compute_dxc(self, *dx):
+    def _compute_dxc(self, dx):
         nface, ndims = self.nfpts, self.ndims
         lt, le, lf = self._lidx
         rt, re, rf = self._ridx
@@ -107,7 +107,7 @@ class BaseIntInters(BaseInters):
         # Connecting vector from adjacent elements
         self._dx_adj = np.empty((ndims, nface))
 
-        def compute_dxc(i_begin, i_end, dx_adj, *dxc):
+        def compute_dxc(i_begin, i_end, dx_adj, dxc):
             for idx in range(i_begin, i_end):
                 lti, lfi, lei = lt[idx], lf[idx], le[idx]
                 rti, rfi, rei = rt[idx], rf[idx], re[idx]
@@ -123,7 +123,7 @@ class BaseIntInters(BaseInters):
                     dxc[rti][rfi, rei, jdx] = -dx
 
         # Compute dx_adj
-        self.be.make_loop(nface, compute_dxc)(self._dx_adj, *dx)
+        self.be.make_loop(nface, compute_dxc)(self._dx_adj, dx)
 
     def _construct_ele_graph(self, elemap, lhs, rhs):
         # Construct connectivity (fact to ele)
