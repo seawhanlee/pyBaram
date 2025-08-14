@@ -23,20 +23,18 @@ class RANSIntInters(BaseAdvecDiffIntInters):
 
         # Kernel to compute flux
         fpts, gradf = self._fpts, self._gradf
-        self.compute_flux = Kernel(self._make_flux(), muf, gradf, *fpts)
+        self.compute_flux = Kernel(self._make_flux(), muf, gradf, fpts)
 
         if impl_op == 'spectral-radius':
             # Kernel to compute Spectral radius
-            nele = len(fpts)
-            fspr = [cell.fspr for cell in elemap.values()]
-            tfspr = [cell.tfspr for cell in elemap.values()]
-            self.compute_spec_rad = Kernel(self._make_spec_rad(nele), muf, *fpts, *fspr, *tfspr)
+            fspr = tuple(cell.fspr for cell in elemap.values())
+            tfspr = tuple(cell.tfspr for cell in elemap.values())
+            self.compute_spec_rad = Kernel(self._make_spec_rad(), muf, fpts, fspr, tfspr)
         elif impl_op == 'approx-jacobian':
             # Kernel to compute Jacobian matrices
-            nele = len(fpts)
-            fjmat = [cell.jmat for cell in elemap.values()]
-            tfjmat = [cell.tjmat for cell in elemap.values()]
-            self.compute_aprx_jac = Kernel(self._make_aprx_jac(nele), muf, gradf, *fpts, *fjmat, *tfjmat)
+            fjmat = tuple(cell.jmat for cell in elemap.values())
+            tfjmat = tuple(cell.tjmat for cell in elemap.values())
+            self.compute_aprx_jac = Kernel(self._make_aprx_jac(), muf, gradf, fpts, fjmat, tfjmat)
 
     def _make_flux(self):
         ndims, nvars, nfvars = self.ndims, self.nvars, self.nfvars
@@ -69,7 +67,7 @@ class RANSIntInters(BaseAdvecDiffIntInters):
         # Get turbulence flux from `turbulent.py`
         tflux = self._make_turb_flux()
 
-        def comm_flux(i_begin, i_end, muf, gradf, *uf):
+        def comm_flux(i_begin, i_end, muf, gradf, uf):
             for idx in range(i_begin, i_end):
                 fn = array((nvars,))
                 um = array((nvars,))
@@ -108,7 +106,7 @@ class RANSIntInters(BaseAdvecDiffIntInters):
 
         return self.be.make_loop(self.nfpts, comm_flux)
 
-    def _make_spec_rad(self, nele):
+    def _make_spec_rad(self):
         nvars = self.nvars
         lt, le, lf = self._lidx
         rt, re, rf = self._ridx
@@ -122,10 +120,7 @@ class RANSIntInters(BaseAdvecDiffIntInters):
         wave_speed = self.ele0.make_wave_speed()
         twave_speed = self.ele0.make_turb_wave_speed()
 
-        def comm_spr(i_begin, i_end, muf, *ufl):
-            uf, _lam = ufl[:nele], ufl[nele:]
-            lam, tlam = _lam[:nele], _lam[nele:]
-
+        def comm_spr(i_begin, i_end, muf, uf, lam, tlam):
             for idx in range(i_begin, i_end):
                 um = array((nvars,))
 
@@ -162,7 +157,7 @@ class RANSIntInters(BaseAdvecDiffIntInters):
 
         return self.be.make_loop(self.nfpts, comm_spr)
     
-    def _make_aprx_jac(self, nele):
+    def _make_aprx_jac(self):
         from pybaram.solvers.euler.jacobian import make_convective_jacobian
         from pybaram.solvers.navierstokes.jacobian import get_viscous_jacobian
 
@@ -200,10 +195,7 @@ class RANSIntInters(BaseAdvecDiffIntInters):
         # Temporal array & matrix
         array = self.be.local()
 
-        def comm_apj(i_begin, i_end, muf, gradf, *ufj):
-            uf, _jmats = ufj[:nele], ufj[nele:]
-            jmats, tjmats = _jmats[:nele], _jmats[nele:]
-
+        def comm_apj(i_begin, i_end, muf, gradf, uf, jmats, tjmats):
             for idx in range(i_begin, i_end):
                 um = array((nvars,))
                 ap = array((nfvars, nfvars))
@@ -274,20 +266,18 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
         # Kernel to compute flux
         fpts, gradf = self._fpts, self._gradf
         rhs = self._rhs
-        self.compute_flux = Kernel(self._make_flux(), muf, gradf, rhs, *fpts)
+        self.compute_flux = Kernel(self._make_flux(), muf, gradf, rhs, fpts)
 
         if impl_op == 'spectral-radius':
             # Kernel to compute Spectral radius
-            nele = len(fpts)
-            fspr = [cell.fspr for cell in elemap.values()]
-            tfspr = [cell.tfspr for cell in elemap.values()]
-            self.compute_spec_rad = Kernel(self._make_spec_rad(nele), muf, *fpts, *fspr, *tfspr)
+            fspr = tuple(cell.fspr for cell in elemap.values())
+            tfspr = tuple(cell.tfspr for cell in elemap.values())
+            self.compute_spec_rad = Kernel(self._make_spec_rad(), muf, fpts, fspr, tfspr)
         elif impl_op == 'approx-jacobian':
             # Kernel to compute Jacobian matrices
-            nele = len(fpts)
-            fjmat = [cell.jmat for cell in elemap.values()]
-            tfjmat = [cell.tjmat for cell in elemap.values()]
-            self.compute_aprx_jac = Kernel(self._make_aprx_jac(nele), muf, gradf, *fpts, *fjmat, *tfjmat)
+            fjmat = tuple(cell.jmat for cell in elemap.values())
+            tfjmat = tuple(cell.tjmat for cell in elemap.values())
+            self.compute_aprx_jac = Kernel(self._make_aprx_jac(), muf, gradf, fpts, fjmat, tfjmat)
 
     def _make_flux(self):
         ndims, nvars, nfvars = self.ndims, self.nvars, self.nfvars
@@ -319,7 +309,7 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
         # Get turbulence flux from `turbulent.py`
         tflux = self._make_turb_flux()
 
-        def comm_flux(i_begin, i_end, muf, gradf, rhs, *uf):
+        def comm_flux(i_begin, i_end, muf, gradf, rhs, uf):
             for idx in range(i_begin, i_end):
                 fn = array((nvars,))
                 um = array((nvars,))
@@ -356,7 +346,7 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
 
         return self.be.make_loop(self.nfpts, comm_flux)
     
-    def _make_spec_rad(self, nele):
+    def _make_spec_rad(self):
         lt, le, lf = self._lidx
         nf = self._vec_snorm
         
@@ -367,10 +357,7 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
         wave_speed = self.ele0.make_wave_speed()
         twave_speed = self.ele0.make_turb_wave_speed()
 
-        def comm_spr(i_begin, i_end, muf, *ufl):
-            uf, _lam = ufl[:nele], ufl[nele:]
-            lam, tlam = _lam[:nele], _lam[nele:]
-
+        def comm_spr(i_begin, i_end, muf, uf, lam, tlam):
             for idx in range(i_begin, i_end):
                 # Normal vector
                 nfi = nf[:, idx]
@@ -394,7 +381,7 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
 
         return self.be.make_loop(self.nfpts, comm_spr)
     
-    def _make_aprx_jac(self, nele):
+    def _make_aprx_jac(self):
         from pybaram.solvers.euler.jacobian import make_convective_jacobian
         from pybaram.solvers.navierstokes.jacobian import get_viscous_jacobian
 
@@ -428,10 +415,7 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
         # Temporal matrix
         array = self.be.local()
 
-        def comm_apj(i_begin, i_end, muf, gradf, *ufj):
-            uf, _jmats = ufj[:nele], ufj[nele:]
-            jmats, tjmats = _jmats[:nele], _jmats[nele:]
-
+        def comm_apj(i_begin, i_end, muf, gradf, uf, jmats, tjmats):
             for idx in range(i_begin, i_end):
                 ap = array((nfvars, nfvars))
                 at = array((ntvars, ntvars))
@@ -505,20 +489,18 @@ class RANSBCInters(BaseAdvecDiffBCInters):
 
         # Kernel to compute flux
         fpts, gradf = self._fpts, self._gradf
-        self.compute_flux = Kernel(self._make_flux(), muf, gradf, *fpts)
+        self.compute_flux = Kernel(self._make_flux(), muf, gradf, fpts)
 
         if impl_op == 'spectral-radius':
             # Kernel to compute Spectral radius
-            nele = len(fpts)
-            fspr = [cell.fspr for cell in elemap.values()]
-            tfspr = [cell.tfspr for cell in elemap.values()]
-            self.compute_spec_rad = Kernel(self._make_spec_rad(nele), muf, *fpts, *fspr, *tfspr)
+            fspr = tuple(cell.fspr for cell in elemap.values())
+            tfspr = tuple(cell.tfspr for cell in elemap.values())
+            self.compute_spec_rad = Kernel(self._make_spec_rad(), muf, fpts, fspr, tfspr)
         elif impl_op == 'approx-jacobian':
             # Kernel to compute Jacobian matrices
-            nele = len(fpts)
-            fjmat = [cell.jmat for cell in elemap.values()]
-            tfjmat = [cell.tjmat for cell in elemap.values()]
-            self.compute_aprx_jac = Kernel(self._make_aprx_jac(nele), muf, gradf, *fpts, *fjmat, *tfjmat)
+            fjmat = tuple(cell.jmat for cell in elemap.values())
+            tfjmat = tuple(cell.tjmat for cell in elemap.values())
+            self.compute_aprx_jac = Kernel(self._make_aprx_jac(), muf, gradf, fpts, fjmat, tfjmat)
 
     def _make_delu(self):
         nvars, ndims = self.nvars, self.ndims
@@ -532,7 +514,7 @@ class RANSBCInters(BaseAdvecDiffBCInters):
 
         bc = self.bc
 
-        def compute_delu(i_begin, i_end, *uf):
+        def compute_delu(i_begin, i_end, uf):
             for idx in range(i_begin, i_end):
                 ur = array((nvars,))
                 nfi = nf[:, idx]
@@ -583,7 +565,7 @@ class RANSBCInters(BaseAdvecDiffBCInters):
         # Get bc function (`self.bc` was defined at `baseadvec.inters`)
         bc = self.bc
 
-        def comm_flux(i_begin, i_end, muf, gradf, *uf):
+        def comm_flux(i_begin, i_end, muf, gradf, uf):
             for idx in range(i_begin, i_end):
                 fn = array((nvars,))
                 um = array((nvars,))
@@ -627,7 +609,7 @@ class RANSBCInters(BaseAdvecDiffBCInters):
 
         return self.be.make_loop(self.nfpts, comm_flux)
 
-    def _make_spec_rad(self, nele):
+    def _make_spec_rad(self):
         lt, le, lf = self._lidx
         nf = self._vec_snorm
         
@@ -638,10 +620,7 @@ class RANSBCInters(BaseAdvecDiffBCInters):
         wave_speed = self.ele0.make_wave_speed()
         twave_speed = self.ele0.make_turb_wave_speed()
 
-        def comm_spr(i_begin, i_end, muf, *ufl):
-            uf, _lam = ufl[:nele], ufl[nele:]
-            lam, tlam = _lam[:nele], _lam[nele:]
-
+        def comm_spr(i_begin, i_end, muf, uf, lam, tlam):
             for idx in range(i_begin, i_end):
                 # Normal vector
                 nfi = nf[:, idx]
@@ -665,7 +644,7 @@ class RANSBCInters(BaseAdvecDiffBCInters):
 
         return self.be.make_loop(self.nfpts, comm_spr)
     
-    def _make_aprx_jac(self, nele):
+    def _make_aprx_jac(self):
         from pybaram.solvers.euler.jacobian import make_convective_jacobian
         from pybaram.solvers.navierstokes.jacobian import get_viscous_jacobian
 
@@ -699,10 +678,7 @@ class RANSBCInters(BaseAdvecDiffBCInters):
         # Temporal matrix
         array = self.be.local()
 
-        def comm_apj(i_begin, i_end, muf, gradf, *ufj):
-            uf, _jmats = ufj[:nele], ufj[nele:]
-            jmats, tjmats = _jmats[:nele], _jmats[nele:]
-
+        def comm_apj(i_begin, i_end, muf, gradf, uf, jmats, tjmats):
             for idx in range(i_begin, i_end):
                 ap = array((nfvars, nfvars))
                 at = array((ntvars, ntvars))

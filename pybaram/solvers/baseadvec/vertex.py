@@ -25,8 +25,8 @@ class BaseAdvecVertex(BaseVertex):
 
         if order > 1 and limiter != 'none':
             # Kernel to compute exterems at vertex
-            upts_in = [ele.upts_in for ele in elemap.values()]
-            self.compute_extv = Kernel(self._make_extv(), self.vpts, *upts_in)
+            upts_in = tuple(ele.upts_in.value for ele in elemap.values())
+            self.compute_extv = Kernel(self._make_extv(), self.vpts, upts_in)
 
             if self._neivtx:
                 # Construct kernels for MPI communication at vertex
@@ -43,7 +43,7 @@ class BaseAdvecVertex(BaseVertex):
         t, e, _ = self._idx
         nvars = self.nvars
 
-        def cal_extv(i_begin, i_end, vext, *upts):
+        def cal_extv(i_begin, i_end, vext, upts):
             for i in range(i_begin, i_end):
                 for idx in range(ivtx[i], ivtx[i+1]):
                     ti, ei = t[idx], e[idx]

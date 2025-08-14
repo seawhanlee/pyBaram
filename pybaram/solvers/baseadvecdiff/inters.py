@@ -9,22 +9,21 @@ import numpy as np
 class BaseAdvecDiffIntInters(BaseAdvecIntInters):
     def construct_kernels(self, elemap):
         # View of elemenet array (flux and gradient)
-        self._fpts = fpts = [cell.fpts for cell in elemap.values()]
-        dfpts = [cell.grad for cell in elemap.values()]
-        nele = len(fpts)
+        self._fpts = fpts = tuple(cell.fpts for cell in elemap.values())
+        dfpts = tuple(cell.grad for cell in elemap.values())
 
         # Array for gradient at face
         self._gradf = gradf = np.empty((self.ndims, self.nvars, self.nfpts))
 
         # Kernel to compute differnce of solution at face
-        self.compute_delu = Kernel(self._make_delu(), *fpts)
+        self.compute_delu = Kernel(self._make_delu(), fpts)
 
         # Kernel to compute gradient at face (Averaging gradient)
         self.compute_grad_at = Kernel(
-            self._make_grad_at(nele), gradf, *fpts, *dfpts
+            self._make_grad_at(), gradf, fpts, dfpts
         )
 
-    def _make_grad_at(self, nele):
+    def _make_grad_at(self):
         nvars, ndims = self.nvars, self.ndims
         lt, le, lf = self._lidx
         rt, re, rf = self._ridx
@@ -37,11 +36,7 @@ class BaseAdvecDiffIntInters(BaseAdvecIntInters):
         # Stack-allocated array
         array = self.be.local()
 
-        def grad_at(i_begin, i_end, gradf, *uf):
-            # Parse element views (fpts, grad)
-            du = uf[:nele]
-            gradu = uf[nele:]
-
+        def grad_at(i_begin, i_end, gradf, du, gradu):
             for idx in range(i_begin, i_end):
                 gf = array((ndims,))
 
@@ -81,23 +76,23 @@ class BaseAdvecDiffMPIInters(BaseAdvecMPIInters):
         grad_rhs = np.empty((self.ndims, self.nvars, self.nfpts))
 
         # View of element array
-        self._fpts = fpts = [cell.fpts for cell in elemap.values()]
-        dfpts = [cell.grad for cell in elemap.values()]
+        self._fpts = fpts = tuple(cell.fpts for cell in elemap.values())
+        dfpts = tuple(cell.grad for cell in elemap.values())
 
         # Kernel to compute differnce of solution at face
-        self.compute_delu = Kernel(self._make_delu(), rhs, *fpts)
+        self.compute_delu = Kernel(self._make_delu(), rhs, fpts)
 
         # Kernel to compute gradient at face (Averaging gradient)
         self.compute_grad_at = Kernel(
-            self._make_grad_at(), gradf, grad_rhs, *fpts
+            self._make_grad_at(), gradf, grad_rhs, fpts
         )
 
         # Kernel for pack, send, receive
-        self.pack = Kernel(self._make_pack(), lhs, *fpts)
+        self.pack = Kernel(self._make_pack(), lhs, fpts)
         self.send, self.sreq = self._make_send(lhs)
         self.recv, self.rreq = self._make_recv(rhs)
 
-        self.pack_grad = Kernel(self._make_pack_grad(), gradf, *dfpts)
+        self.pack_grad = Kernel(self._make_pack_grad(), gradf, dfpts)
         self.send_grad, self.sgreq = self._make_send(gradf)
         self.recv_grad, self.rgreq = self._make_recv(grad_rhs)
 
@@ -113,7 +108,7 @@ class BaseAdvecDiffMPIInters(BaseAdvecMPIInters):
         # Stack-allocated array
         array = self.be.local()
 
-        def grad_at(i_begin, i_end, gradf, grad_rhs, *du):
+        def grad_at(i_begin, i_end, gradf, grad_rhs, du):
             for idx in range(i_begin, i_end):
                 gf = array((ndims,))
 
@@ -144,7 +139,7 @@ class BaseAdvecDiffMPIInters(BaseAdvecMPIInters):
         ndims, nvars = self.ndims, self.nvars
         lt, le, _ = self._lidx
 
-        def pack(i_begin, i_end, lhs, *uf):
+        def pack(i_begin, i_end, lhs, uf):
             for idx in range(i_begin, i_end):
                 lti, lei = lt[idx], le[idx]
 
@@ -160,22 +155,21 @@ class BaseAdvecDiffBCInters(BaseAdvecBCInters):
         self.construct_bc()
 
         # View of elemenet array
-        self._fpts = fpts = [cell.fpts for cell in elemap.values()]
-        dfpts = [cell.grad for cell in elemap.values()]
-        nele = len(fpts)
+        self._fpts = fpts = tuple(cell.fpts for cell in elemap.values())
+        dfpts = tuple(cell.grad for cell in elemap.values())
 
         # Gradient at face
         self._gradf = gradf = np.empty((self.ndims, self.nvars, self.nfpts))
 
         # Kernel to compute differnce of solution at face
-        self.compute_delu = Kernel(self._make_delu(), *fpts)
+        self.compute_delu = Kernel(self._make_delu(), fpts)
 
         # Kernel to compute gradient at face (Averaging gradient)
         self.compute_grad_at = Kernel(
-            self._make_grad_at(nele), gradf, *fpts, *dfpts
+            self._make_grad_at(), gradf, fpts, dfpts
         )
 
-    def _make_grad_at(self, nele):
+    def _make_grad_at(self):
         nvars, ndims = self.nvars, self.ndims
         lt, le, lf = self._lidx
 
@@ -187,11 +181,7 @@ class BaseAdvecDiffBCInters(BaseAdvecBCInters):
         # Stack-allocated array
         array = self.be.local()
 
-        def grad_at(i_begin, i_end, gradf, *uf):
-            # Parse element views (fpts, grad)
-            du = uf[:nele]
-            gradu = uf[nele:]
-
+        def grad_at(i_begin, i_end, gradf, du, gradu):
             for idx in range(i_begin, i_end):
                 gf = array((ndims,))
 
