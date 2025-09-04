@@ -241,11 +241,13 @@ class NodesAssembler(object):
                     'tet': 3, 'hex': 3, 'pri': 3, 'pyr': 3}
     
     def __init__(self, nodepts, elenodes, felespent, bfacespents, etype_map, scale):
-        self._nodepts, self._elenodes = nodepts, elenodes
+        # Scale geometry
+        self._nodepts = nodepts*scale
+
+        self._elenodes = elenodes
         self._bfacespents = {v: k for k, v in bfacespents.items()}
         self._felespent = felespent
         self._etype_map = etype_map
-        self._scale = scale
 
     def _fluid_elm(self):
         elm = {}
@@ -266,7 +268,7 @@ class NodesAssembler(object):
         return elm, spt, bnode
 
     def get_nodes(self):
-        vals = self._nodepts[1:]*self._scale
+        vals = self._nodepts[1:]
 
         ret = {'nodes': vals}
         elm, spt, bnode = self._fluid_elm()

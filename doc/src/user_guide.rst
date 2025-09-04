@@ -31,6 +31,10 @@ When you run ``pybaram``, following help output is given::
 
         user@Computer ~/pyBaram$ pybaram import mesh.cgns mesh.pbrm
 
+   You can also scale the mesh by appending the ``-s`` option. For example, to scale by 0.001::
+
+       user@Computer ~/pyBaram$ pybaram import mesh.cgns mesh.pbrm -s 0.001
+
 2. ``pybaram partition`` --- Partition mesh file for MPI parallel computation.
    Currently, unsplitted mesh file can be partitioned.
     
