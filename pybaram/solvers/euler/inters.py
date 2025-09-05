@@ -289,8 +289,8 @@ class EulerBCInters(BaseAdvecBCInters):
             self.compute_spec_rad = Kernel(self._make_spec_rad(), fpts, fspr)
         elif impl_op == 'approx-jacobian':
             # Kernel to compute Jacobian matrices
-            fjmat = [cell.jmat for cell in elemap.values()]
-            self.compute_aprx_jac = Kernel(self._make_aprx_jac(), *fpts, *fjmat)
+            fjmat = tuple(cell.jmat for cell in elemap.values())
+            self.compute_aprx_jac = Kernel(self._make_aprx_jac(), fpts, fjmat)
 
     def _make_flux(self):
         ndims, nfvars = self.ndims, self.nfvars
