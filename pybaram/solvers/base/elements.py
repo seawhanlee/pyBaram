@@ -64,7 +64,7 @@ class BaseElements:
         # Add connectivity (edge)
         for row in range(len(indptr) - 1):
             start = indptr[row]
-            end = indptr[row] + 1
+            end = indptr[row + 1]
             cols = indices[start:end]
 
             for col in cols:
