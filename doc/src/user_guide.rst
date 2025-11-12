@@ -31,16 +31,20 @@ When you run ``pybaram``, following help output is given::
 
         user@Computer ~/pyBaram$ pybaram import mesh.cgns mesh.pbrm
 
+2. ``pybaram partition`` --- Partition mesh file and solution files for MPI parallel computation.
    You can also scale the mesh by appending the ``-s`` option. For example, to scale by 0.001::
 
        user@Computer ~/pyBaram$ pybaram import mesh.cgns mesh.pbrm -s 0.001
 
 2. ``pybaram partition`` --- Partition mesh file for MPI parallel computation.
-   Currently, unsplitted mesh file can be partitioned.
     
    Example::
 
         user@Computer ~/pyBaram$ pybaram partition 2 mesh.pbrm mesh_p2.pbrm
+
+   You can also partition the solution files associated with a mesh file and save the results to a specified folder:
+
+        user@Computer ~/pyBaram$ pybaram partition 2 mesh.pbrm out.pbrs p2_folder
 
 3. ``pybaram run`` --- Conduct flow simulation with a given mesh and configuration files (``.ini``).
 

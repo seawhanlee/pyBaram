@@ -1,9 +1,11 @@
 import h5py
 import numpy as np
+import os
+import re
 import uuid
 
 from collections import defaultdict
-from itertools import combinations
+from itertools import combinations, product
 
 from pybaram.partitions.metiswrapper import METISWrapper
 
@@ -11,28 +13,229 @@ from pybaram.partitions.metiswrapper import METISWrapper
 class METISPartition:
     _wmap = {'quad': 3, 'tri': 2, 'tet': 4, 'pri': 5, 'pyr': 5, 'hex': 6}
 
-    def __init__(self, msh, out, npart):
-        # TODO: merge mesh
-        # TODO: partitioning solution
+    def __init__(self, msh, out, npart, sols):
+        # Set destination path and file name
+        if out.endswith(".pbrm"):
+            path = '.'
+            mshname = out
+        else:
+            path=out
+            mshname = msh.name
+
+        # Check mesh partition
+        msh_part = self._npart(msh)
+
+        # Check solution is none or not
+        has_sols = len(sols) > 0
+        if has_sols:
+            solnames = [os.path.join(path, sol.name) for sol in sols]
+        
+        # Merge mesh
+        if msh_part > 1:
+            msh, unions, old_uuid = self._merge_mesh(msh, msh_part)
+
+            if has_sols:
+                # Check UUID for sols
+                if np.any([sol['mesh_uuid'] != old_uuid for sol in sols]):
+                    raise ValueError("Solutions are not matched with the mesh")
+
+                # Collect solution file names and merging solutions
+                sols = [self._merge_soln(sol, msh_part, unions, msh['mesh_uuid']) for sol in sols]
 
         # Partitioning elements and mapping
-        newm, eidx_g2l = self.partition_mesh(msh, npart)
+        mapper = self.partition_mesh(msh, npart)
+
+        # Make new mesh
+        newm = defaultdict(list)
 
         # Update elements, connectivities, vertex and nodes
-        newm.update(self.partition_elm(msh, eidx_g2l))
-        newm.update(self.partition_spt(msh, eidx_g2l))
-        newm.update(self.partition_cons(msh, eidx_g2l))
-        newm.update(self.partition_bcons(msh, eidx_g2l))
-        newm.update(self.partition_vtx(msh, eidx_g2l))
+        self.partition_elm(msh, newm, mapper)
+        self.partition_spt(msh, newm, mapper)
+        self.partition_cons(msh, newm, mapper)
+        self.partition_bcons(msh, newm, mapper)
+        self.partition_vtx(msh, newm, mapper)
         self.copy_nodes(msh, newm)
 
         # Assign new UUID
         newm['mesh_uuid'] = np.array(str(uuid.uuid4()), dtype='S')
 
         # Save new mesh
-        with h5py.File(out, 'w') as f:
+        mshf = os.path.join(path, os.path.split(mshname)[-1])
+        with h5py.File(mshf, 'w') as f:
             for k, v in newm.items():
                 f[k] = v
+
+        if has_sols:
+            # Partitioning solutions
+            for sol, solname in zip(sols, solnames):
+                solf = os.path.join(path, os.path.split(solname)[-1])
+            
+                # Partition solution
+                self.partition_soln(sol, mapper, newm['mesh_uuid'], solf)
+
+    def _npart(self, msh):
+        # Check number of partion for the given msh
+        msh_part = 0
+        for k in msh:
+            m = re.match(r"con_p(\d+)", k)
+            if m:
+                msh_part = max(msh_part, eval(m.group(1)))
+        msh_part += 1
+
+        return msh_part
+
+    def _merge_mesh(self, msh, npart, is_save=False):
+        # Mesh dictionary
+        newm = defaultdict(list)
+
+        # Find element types
+        etypes = set(k.split('_')[1] for k in msh if k.startswith('elm'))
+        
+        # Infomation for unions {etype : nelm}
+        unions = {}
+        for etype in etypes:
+            nelm = [0]
+            for rank in range(npart):
+                name = 'elm_{}_p{}'.format(etype, rank)
+                if name in msh:
+                    n = msh[name].shape[0]
+
+                    # Append elm and spt per rank
+                    newm['elm_{}_p0'.format(etype)].append(msh[name])
+                    newm['spt_{}_p0'.format(etype)].append(msh['spt_{}_p{}'.format(etype, rank)])
+                else:
+                    n = 0
+
+                nelm.append(n)               
+            
+            # Added number for element and rank
+            unions[etype] = np.cumsum(nelm)[:-1]
+
+            newm['elm_{}_p0'.format(etype)] = np.vstack(newm['elm_{}_p0'.format(etype)])
+            newm['spt_{}_p0'.format(etype)] = np.hstack(newm['spt_{}_p0'.format(etype)])
+
+        # Globalize connectivity
+        def globalize_con(lhs, rank, unions, etypes):
+            for etype in etypes:
+                mask = lhs['f0'] == etype.encode()
+                lhs['f1'][mask] += unions[etype][rank]
+
+        # Merge inner connectivity
+        lhs, rhs = [], []
+        for rank in range(npart):
+            l, r = msh['con_p{}'.format(rank)]
+            globalize_con(l, rank, unions, etypes)
+            globalize_con(r, rank, unions, etypes)
+
+            lhs.append(l)
+            rhs.append(r)
+
+        # Merge MPI connectivity
+        for (lrank, rrank) in combinations(range(npart), 2):
+            lname = 'con_p{}p{}'.format(lrank, rrank)
+            if lname in msh:
+                rname = 'con_p{}p{}'.format(rrank, lrank)
+
+                l, r = msh[lname], msh[rname]
+
+                globalize_con(l, lrank, unions, etypes)
+                globalize_con(r, rrank, unions, etypes)
+
+                lhs.append(l)
+                rhs.append(r)
+
+        # Obtain new connectivity
+        lhs = np.hstack(lhs)
+        rhs = np.hstack(rhs)
+        newm['con_p0'] = np.vstack([lhs, rhs])
+
+        # Find the boundary conditions
+        bcs = set(k.split('_')[1] for k in msh if k.startswith('bcon'))
+
+        # Merge BC
+        for bc in bcs:
+            lhs = []
+            for rank in range(npart):
+                name = 'bcon_{}_p{}'.format(bc, rank)
+                if name in msh:
+                    l = msh[name]
+
+                    globalize_con(l, rank, unions, etypes)
+                    lhs.append(l)
+            
+            newm['bcon_{}_p0'.format(bc)] = np.hstack(lhs)
+
+        # Build vmap (vertex, [vtx])
+        #TODO: may be expensive
+        vmap = defaultdict(list)
+        for rank in range(npart):
+            vtx = msh['vtx_p{}'.format(rank)]
+
+            vn = np.empty(len(vtx), dtype=int)
+            for etype in etypes:
+                name = 'elm_{}_p{}'.format(etype, rank)
+                mask = vtx['f0'] == etype.encode()
+
+                if name in msh:
+                    elm = msh[name]
+                    vn[mask] = elm[vtx[mask]['f1'], vtx[mask]['f2']]
+
+            globalize_con(vtx, rank, unions, etypes)
+
+            for k, v in zip(vn, vtx):
+                vmap[int(k)].append(v)
+
+        # Obtain vtx and ivtx from vmap
+        newm['vtx_p0'] = np.hstack([vmap[i] for i in sorted(vmap.keys())])
+        nvtx = np.array([len(vmap[i]) for i in sorted(vmap.keys())])
+        newm['ivtx_p0'] = np.concatenate([[0], np.cumsum(nvtx)])
+
+        # Copy nodes
+        self.copy_nodes(msh, newm)
+
+        # Assign new UUID
+        newm['mesh_uuid'] = np.array(str(uuid.uuid4()), dtype='S')
+        
+        # Save new mesh
+        if is_save:
+            with h5py.File('merged.pbrm', 'w') as f:
+                for k, v in newm.items():
+                    f[k] = v
+
+        return newm, unions, msh['mesh_uuid']
+    
+    def _merge_soln(self, soln, npart, etypes, mesh_uuid):
+        # New solution
+        news = {}
+
+        # Default vaules
+        news['mesh_uuid'] = mesh_uuid
+        news['config'] = soln['config']
+        news['stats'] = soln['stats']
+
+        # Check aux or not
+        is_aux = np.any([k.startswith('aux') for k in soln])
+
+        for etype in etypes:
+            sol = []
+            if is_aux:
+                aux = []
+
+            for rank in range(npart):
+                name = 'soln_{}_p{}'.format(etype, rank)
+
+                if name in soln:
+                    sol.append(soln[name])
+
+                    if is_aux:
+                        aux.append(soln['aux_{}_p{}'.format(etype, rank)])
+
+            news['soln_{}_p0'.format(etype)] = np.hstack(sol)
+
+            if is_aux:
+                news['aux_{}_p0'.format(etype)] = np.hstack(aux)
+
+        return news
 
     def partition_mesh(self, msh, npart):
          # list of elements type
@@ -48,25 +251,64 @@ class METISPartition:
 
         # Do metis Partition
         epart = self._metis_part(npart, etypes, nele, elms)
+        epart = epart.astype(int)
 
-        # Make new mesh
-        newmesh = defaultdict(list)
+        # Mapper etype : (epart, lidx)
+        mapper = {}
+        i0, i1 = 0, 0
+        for t in etypes:
+            # Numbering for elements
+            n = nele[t]
+            addr = np.arange(n)
+            
+            # Partition info for the specific element type
+            i1 += n
+            lepart = epart[i0:i1]
 
-        # Global address
-        egidx = [(n, i) for n in etypes for i in range(nele[n])]
+            # Local index after partitioning for the specific element type
+            leidx = np.empty_like(lepart)
+            for p in np.unique(lepart):
+                mask = addr[lepart == p] 
+                leidx[mask] = np.arange(len(mask))
 
-        # local address counter
-        etype_rank = [(n, p) for n in etypes for p in range(npart)]
-        lcounter = dict(zip(etype_rank, [0]*len(etype_rank)))
+            # Save the mapper for the specific element type
+            mapper[t] = {'rank' : lepart, 'local' : leidx}
+            i0 += n
 
-        # eidx_g2l (etype, g) -> (rank, l)
-        eidx_g2l = {}
-        for (t, e), p in zip(egidx, epart):
-            i = lcounter[t, p]
-            eidx_g2l[(t, e)] = (p, i)
-            lcounter[t, p] += 1
+        return mapper
+    
+    def partition_soln(self, soln, mapper, mesh_uuid, solf):
+        # New solution
+        news = {}
 
-        return newmesh, eidx_g2l
+        # Default vaules
+        news['mesh_uuid'] = mesh_uuid
+        news['config'] = soln['config']
+        news['stats'] = soln['stats']
+
+        # Check aux or not
+        is_aux = np.any([k.startswith('aux') for k in soln])
+        
+        for t, lmap in mapper.items():
+            sol = soln['soln_{}_p0'.format(t)]
+
+            if is_aux:
+                aux = soln['aux_{}_p0'.format(t)]
+
+            for p in np.unique(lmap['rank']):
+                # Mask for the rank
+                mask = lmap['rank'] == p
+
+                # Save elm for each rank
+                news['soln_{}_p{}'.format(t, p)] = sol[:, mask]
+
+                if is_aux:
+                    news['aux_{}_p{}'.format(t, p)] = aux[:, mask]
+
+        # Save new solutioj
+        with h5py.File(solf, 'w') as f:
+            for k, v in news.items():
+                f[k] = v
 
     def _metis_part(self, npart, etypes, nele, elms):
         # Linked list of elms
@@ -90,107 +332,145 @@ class METISPartition:
 
         return epart
 
-    def partition_elm(self, msh, eidx_g2l):
-        elms = {
-            n.split('_')[1]: msh[n] for n in msh if n.startswith('elm')
-        }
+    def _localized_con(self, lhs, mapper):
+        cpart = np.empty(len(lhs), dtype=int)
 
-        # Sort elements per rank
-        newelm = defaultdict(list)
-        for (t, g), (p, l) in eidx_g2l.items():
-            ele = elms[t][g]
-            newelm['elm_{}_p{}'.format(t, p)].append(ele)
+        for t, lmap in mapper.items():
+            # Mask elements
+            mask = lhs['f0'] == t.encode()
 
-        return {k: np.array(v) for k, v in newelm.items()}
+            # Global element index
+            gidx = lhs['f1'][mask]
+
+            # Obtain partitions for connectivity
+            cpart[mask] = lmap['rank'][gidx]
+
+            # Convert global index to local
+            lhs['f1'][mask] = lmap['local'][gidx]
+
+        return lhs, cpart
+
+    def partition_elm(self, msh, newm, mapper):
+        for t, lmap in mapper.items():
+            elm = msh['elm_{}_p0'.format(t)]
+
+            for p in np.unique(lmap['rank']):
+                # Mask for the rank
+                mask = lmap['rank'] == p
+
+                # Save elm for each rank
+                newm['elm_{}_p{}'.format(t, p)] = elm[mask]
     
-    def partition_spt(self, msh, eidx_g2l):
-        spts = {
-            n.split('_')[1]: msh[n] for n in msh if n.startswith('spt')
-        }
+    def partition_spt(self, msh, newm, mapper):
+        for t, lmap in mapper.items():
+            spt = msh['spt_{}_p0'.format(t)]
 
-        # Sort spt per rank
-        newelm = defaultdict(list)
-        for (t, g), (p, _) in eidx_g2l.items():
-            spt = spts[t][:, g]
-            newelm['spt_{}_p{}'.format(t, p)].append(spt)
+            for p in np.unique(lmap['rank']):
+                # Mask for the rank
+                mask = lmap['rank'] == p
 
-        arr = {k: np.array(v).swapaxes(0, 1) for k, v in newelm.items()}
-        return arr
+                # Save elm for each rank
+                newm['spt_{}_p{}'.format(t, p)] = spt[:, mask]
 
-    def partition_cons(self, msh, eidx_g2l):
-        lhs, rhs = msh['con_p0'].astype('U4,i4,i1,i1').tolist()
+    def partition_cons(self, msh, newm, mapper):
+        lhs, rhs = msh['con_p0']
 
-        # Partition cons
-        cons = defaultdict(list)
-        for (lt, le, lf, lz), (rt, re, rf, rz) in zip(lhs, rhs):
-            pl, lel = eidx_g2l[(lt, le)]
-            pr, rel = eidx_g2l[(rt, re)]
+        # Localized connecvity and rank information
+        lhs, lpart = self._localized_con(lhs, mapper)
+        rhs, rpart = self._localized_con(rhs, mapper)
 
-            if pl == pr:
-                # Save internal connectivity
-                cons['con_p{}'.format(pl)].append(
-                    [(lt, lel, lf, lz), (rt, rel, rf, rz)])
+        # Pre-computed left and right masks for each ranks
+        lranks, rranks = np.unique(lpart), np.unique(rpart)
+        lmasks = {l: lpart == l for l in lranks}
+        rmasks = {r: rpart == r for r in rranks}
+
+        # Partition connectivity
+        mask = np.empty_like(lpart, dtype=bool)
+        for l, r in product(lranks, rranks):
+            np.logical_and(lmasks[l], rmasks[r], out=mask)
+
+            if not np.any(mask):
+                pass
+            elif l == r:
+                # Internal connectivity
+                newm['con_p{}'.format(l)] = [lhs[mask], rhs[mask]]
             else:
-                # Save parallel connectivity
-                cons['con_p{}p{}'.format(pl, pr)].append((lt, lel, lf, lz))
-                cons['con_p{}p{}'.format(pr, pl)].append((rt, rel, rf, rz))
+                # MPI connectivity
+                newm['con_p{}p{}'.format(l, r)].extend(lhs[mask].tolist())
+                newm['con_p{}p{}'.format(r, l)].extend(rhs[mask].tolist())
 
-        return {k: np.array(v, dtype='S4,i4,i1,i1').T for k, v in cons.items()}
+        # Save as array
+        for k in newm:
+            if k.startswith('con_'):
+                newm[k] = np.array(newm[k], dtype='S4,i4,i1,i1')
 
-    def partition_bcons(self, msh, eidx_g2l):
+    def partition_bcons(self, msh, newm, mapper):
         # Partitioning bcons
-        bcons = defaultdict(list)
         for k in msh:
             if k.startswith('bcon'):
                 bctype = '_'.join(k.split('_')[1:-1])
-                bc = msh[k].astype('U4,i4,i1,i1').tolist()
+                lhs = msh[k]
 
-                for (t, e, f, z) in bc:
-                    p, el = eidx_g2l[(t, e)]
+                # Localized bcon
+                lhs, lpart = self._localized_con(lhs, mapper)
 
-                    # Save boundary connectivity per rank
-                    bcons['bcon_{}_p{}'.format(bctype, p)].append(
-                        (t, el, f, z))
+                for p in np.unique(lpart):
+                    mask = lpart == p
+                    newm['bcon_{}_p{}'.format(bctype, p)] = lhs[mask]
 
-        return {k: np.array(v, dtype='S4,i4,i1,i1') for k, v in bcons.items()}
+    def partition_vtx(self, msh, newm, mapper):
+        # Read vtx and ivtx for merged mesh
+        vtx, ivtx = msh['vtx_p0'], msh['ivtx_p0']
 
-    def partition_vtx(self, msh, eidx_g2l):
-        new = defaultdict(list)
+        # Localized the vtx data
+        vtx, vpart = self._localized_con(vtx, mapper)
+        
+        for p in np.unique(vpart):
+            # Distinguish the vtx belong the rank
+            mask = vpart == p
+            newm['vtx_p{}'.format(p)] = vtx[mask]
 
-        # Partitioning vtx
-        vtx = msh['vtx_p0'].astype('U4,i4,i1,i1').tolist()
-        ivtx = msh['ivtx_p0']
+            # Cumulation of number of vtx for each vertex
+            cs0 = np.empty(mask.size + 1, dtype=np.int64)
+            cs0[0] = 0
+            np.cumsum(mask, out=cs0[1:])
 
+            # Distinguish the vertex belong the rank
+            has_any = (cs0[ivtx[1:]] - cs0[ivtx[:-1]]) > 0
+
+            # Save indices of link-list vtx and ivtx
+            newm['ivtx_p{}'.format(p)] = cs0[ivtx[1:]][has_any]
+
+        # Collect local vertex address to communicate
+        n_ivtx_p = np.zeros(vpart.max() + 1, dtype=int)
         for i1, i2 in zip(ivtx[:-1], ivtx[1:]):
-            # Convert local vtx for rank
-            lvtx = defaultdict(list)
-            for i in range(i1, i2):
-                t, e, f, z = vtx[i]
-                p, el = eidx_g2l[(t, e)]
-                lvtx[p].append((t, el, f, z))
+            # Local ranks
+            lpart = vpart[i1:i2]
+            lranks = set(lpart)
 
-            for p in lvtx:
-                new['vtx_p{}'.format(p)].extend(lvtx[p])
-                new['ivtx_p{}'.format(p)].append(len(lvtx[p]))
+            for p in lranks:
+                # Local index for the current vertex
+                n_ivtx_p[p] += 1
 
-            if len(lvtx) > 1:
-                for (p1, p2) in combinations(lvtx, 2):
-                    nvtx1 = len(new['ivtx_p{}'.format(p1)]) - 1
-                    nvtx2 = len(new['ivtx_p{}'.format(p2)]) - 1
+            if len(lranks) > 1:
+                # Combiation of p2p communications at the currcent vertex
+                for p1, p2 in combinations(lranks, 2):
+                    # Zero-numbering
+                    nvtx1 = n_ivtx_p[p1] - 1
+                    nvtx2 = n_ivtx_p[p2] - 1
 
-                    new['nvtx_p{}p{}'.format(p1, p2)].append(nvtx1)
-                    new['nvtx_p{}p{}'.format(p2, p1)].append(nvtx2)
+                    # Save p2p communication lists
+                    newm['nvtx_p{}p{}'.format(p1, p2)].append(nvtx1)
+                    newm['nvtx_p{}p{}'.format(p2, p1)].append(nvtx2)
 
         # Make numpy array
-        for k, v in new.items():
+        for k, v in newm.items():
             if k.startswith('vtx'):
-                new[k] = np.array(v, dtype='S4,i4,i1,i1')
+                newm[k] = np.array(v, dtype='S4,i4,i1,i1')
             elif k.startswith('ivtx'):
-                new[k] = np.cumsum([0] + v, dtype='i4')
+                newm[k] = np.concatenate([[0], v], dtype='i4')
             elif k.startswith('nvtx'):
-                new[k] = np.array(v, dtype='i4')
-
-        return new
+                newm[k] = np.array(v, dtype='i4')
 
     def copy_nodes(self, msh, newm):
         # Copy nodes

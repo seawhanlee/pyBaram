@@ -12,7 +12,7 @@ def process_import(args):
 
 
 def process_part(args):
-    partition_mesh(args.mesh, args.out, args.npart)
+    partition_mesh(args.mesh, args.out, args.npart, args.soln)
 
 
 def process_export(args):
@@ -59,6 +59,7 @@ def main():
     ap_part = sp.add_parser('partition', help='partition --help')
     ap_part.add_argument('npart', help='number of partition')
     ap_part.add_argument('mesh', help='mesh file')
+    ap_part.add_argument('soln', nargs='*', type=str, help='solution file')
     ap_part.add_argument('out', help='partitioned mesh file')
     ap_part.set_defaults(process=process_part)
 

@@ -32,13 +32,14 @@ def import_mesh(inmesh, outmesh, scale=1.0):
             f[k] = v
 
 
-def partition_mesh(inmesh, outmesh, npart):
+def partition_mesh(inmesh, outmesh, npart, solns=[]):
     """
     Paritioning pyBarm mesh
 
     :param string inmesh: path and name of unspliited pyBaram mesh
-    :param string outmesh: path and name of patitioned mesh
+    :param string outmesh: path and/or name of patitioned mesh
     :param int npart: number of partition
+    :param string solution: path and name of patitioned mesh
     """
 
     # mesh
@@ -46,7 +47,10 @@ def partition_mesh(inmesh, outmesh, npart):
 
     npart = int(npart)
 
-    get_partition(msh, outmesh, npart)
+    if len(solns) > 0:
+        solns = [NativeReader(soln) for soln in solns]
+
+    get_partition(msh, outmesh, npart, solns)
 
 
 def export_soln(mesh, soln, out):

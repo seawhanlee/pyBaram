@@ -4,6 +4,7 @@ import h5py
 
 class NativeReader(object):
     def __init__(self, meshf):
+        self.name = meshf
         self._file = h5py.File(meshf, 'r')
 
     def __getitem__(self, item):
