@@ -299,9 +299,6 @@ class LUSGS(BaseSteadyIntegrator):
 
         # LU-SGS for each elements
         for ele in self.sys.eles:      
-            # Get reordering result
-            mapping, unmapping = ele.reordering()
-
             # diagonal and lambda array
             diag = np.empty(ele.neles)
 
@@ -313,7 +310,7 @@ class LUSGS(BaseSteadyIntegrator):
             _update = make_lusgs_update(ele)
             _pre_lusgs = make_lusgs_common(ele, factor=1.0)
             _lsweep, _usweep = make_serial_lusgs(
-                be, ele, nv, mapping, unmapping, _flux
+                be, ele, nv, _flux
             )
 
             # Initiate LU-SGS kernel objects
@@ -338,7 +335,7 @@ class LUSGS(BaseSteadyIntegrator):
                 # Compile LU-SGS functions for turbulent variables
                 _pre_tlusgs = make_lusgs_common(ele, factor=self._tcfl_fac)
                 _tlsweep, _tusweep = make_serial_lusgs(
-                    be, ele, tnv, mapping, unmapping, _tflux
+                    be, ele, tnv, _tflux
                 )
 
                 # Initiate LU-SGS kernel objects for turbulent variables
@@ -601,9 +598,6 @@ class BlockLUSGS(BaseSteadyIntegrator):
 
         # Block LU-SGS method for each element
         for ele in self.sys.eles:
-            # Get reordering result
-            mapping, unmapping = ele.reordering()
-
             # Temporal array and matrix
             diag = np.empty((ele.nfvars, ele.nfvars, ele.neles))
             ele.subres = np.zeros((ele.neles,), dtype=np.float64)
@@ -612,7 +606,7 @@ class BlockLUSGS(BaseSteadyIntegrator):
             # Compile Block LU-SGS functions
             _update = make_blusgs_update(ele)
             _pre_blusgs = make_pre_blusgs(be, ele, nv)
-            _lower, _upper = make_serial_blusgs(be, ele, nv, mapping, unmapping)
+            _lower, _upper = make_serial_blusgs(be, ele, nv)
 
             # Initiate Block LU-SGS kernel objects
             pre_blusgs = Kernel(be.make_loop(ele.neles, _pre_blusgs),
@@ -639,7 +633,7 @@ class BlockLUSGS(BaseSteadyIntegrator):
                 pre_tblusgs = Kernel(be.make_loop(ele.neles, _pre_tblusgs),
                                      ele.upts[0], ele.dt, tdiag, ele.tjmat, ele.dsrc)
                 
-                _tlsweep, _tusweep = make_serial_blusgs(be, ele, tnv, mapping, unmapping)
+                _tlsweep, _tusweep = make_serial_blusgs(be, ele, tnv)
                 tlsweep = Kernel(be.make_loop(ele.neles, _tlsweep),
                                  ele.upts[1], ele.upts[2], tdiag, ele.tjmat)
                 tusweep = Kernel(be.make_loop(ele.neles, _tusweep),

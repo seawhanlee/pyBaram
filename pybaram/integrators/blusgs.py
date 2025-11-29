@@ -124,7 +124,7 @@ def make_tpre_blusgs(be, ele, nv, dsrcf, factor):
     return _pre_tblusgs
 
 
-def make_serial_blusgs(be, ele, nv, mapping, unmapping):
+def make_serial_blusgs(be, ele, nv):
     # Local array and matrix
     array = be.local()
 
@@ -143,8 +143,7 @@ def make_serial_blusgs(be, ele, nv, mapping, unmapping):
 
     def _lower_sweep(i_begin, i_end, rhsb, dub, diag, fjmat):
         # Lower (Forward) sweep
-        for _idx in range(i_begin, i_end):
-            idx = mapping[_idx]
+        for idx in range(i_begin, i_end):
             rhs = array((dnv,))
             dmat = array((dnv, dnv))
 
@@ -159,7 +158,7 @@ def make_serial_blusgs(be, ele, nv, mapping, unmapping):
             for jdx in range(nface):
                 neib = nei_ele[jdx, idx]
 
-                if unmapping[neib] != _idx:
+                if neib != idx:
                     fv = fnorm_vol[jdx, idx]
                     for kdx in range(dnv):
                         val = 0.0
@@ -176,8 +175,7 @@ def make_serial_blusgs(be, ele, nv, mapping, unmapping):
 
     def _upper_sweep(i_begin, i_end, rhsb, dub, diag, fjmat):
         # Upper (Backward) sweep
-        for _idx in range(i_end-1, i_begin-1, -1):
-            idx = mapping[_idx]
+        for idx in range(i_end-1, i_begin-1, -1):
             rhs = array((dnv,))
             dmat = array((dnv, dnv))
 
@@ -192,7 +190,7 @@ def make_serial_blusgs(be, ele, nv, mapping, unmapping):
             for jdx in range(nface):
                 neib = nei_ele[jdx, idx]
 
-                if unmapping[neib] != _idx:
+                if neib != idx:
                     fv = fnorm_vol[jdx, idx]
                     for kdx in range(dnv):
                         val = 0.0
