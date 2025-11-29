@@ -56,7 +56,7 @@ def make_lusgs_common(ele, factor=1.0):
     return _pre_lusgs
 
 
-def make_serial_lusgs(be, ele, nv, mapping, unmapping, _flux):
+def make_serial_lusgs(be, ele, nv, _flux):
     # dimensions for variable and face
     nvars, nface = ele.nvars, ele.nface
     dnv = nv[1] - nv[0]
@@ -75,9 +75,7 @@ def make_serial_lusgs(be, ele, nv, mapping, unmapping, _flux):
 
     def _lower_sweep(i_begin, i_end, uptsb, rhsb, dub, diag, dsrc, lambdaf):
         # Lower sweep via mapping
-        for _idx in range(i_begin, i_end):
-            idx = mapping[_idx]
-
+        for idx in range(i_begin, i_end):
             du = array((nvars,))
             dfj = array((dnv,))
             df = array((dnv,))
@@ -90,7 +88,7 @@ def make_serial_lusgs(be, ele, nv, mapping, unmapping, _flux):
                 nf = vec_fnorm[jdx, :, idx]
 
                 neib = nei_ele[jdx, idx]
-                if unmapping[neib] < _idx:
+                if neib < idx:
                     u = uptsb[:, neib]
 
                     for kdx in range(nvars):
@@ -111,10 +109,8 @@ def make_serial_lusgs(be, ele, nv, mapping, unmapping, _flux):
                                        0.5*df[kdx])/(diag[idx] + dsrc[kdx+nv[0], idx])
 
     def _upper_sweep(i_begin, i_end, uptsb, rhsb, dub, diag, dsrc, lambdaf):
-        for _idx in range(i_end-1, i_begin-1, -1):
+        for idx in range(i_end-1, i_begin-1, -1):
             # Upper sweep via mapping (reverse order)
-            idx = mapping[_idx]
-
             du = array((nvars,))
             dfj = array((dnv,))
             df = array((dnv,))
@@ -126,7 +122,7 @@ def make_serial_lusgs(be, ele, nv, mapping, unmapping, _flux):
                 nf = vec_fnorm[jdx, :, idx]
 
                 neib = nei_ele[jdx, idx]
-                if unmapping[neib] > _idx:
+                if neib > idx:
                     # Compute upper portion of off-diagonal
                     u = uptsb[:, neib]
 

@@ -9,6 +9,7 @@ from itertools import chain
 import uuid
 
 import numpy as np
+import re
 
 from pybaram.utils.np import fuzzysort
 
@@ -24,6 +25,9 @@ class BaseReader(object, metaclass=ABCMeta):
 
     def to_pbm(self):
         mesh = self._to_raw_pbm()
+
+        # Reorder Mesh (RCM)
+        reorder(mesh)
 
         # Add metadata
         mesh['mesh_uuid'] = np.array(str(uuid.uuid4()), dtype='S')
@@ -288,3 +292,136 @@ class NodesAssembler(object):
 
     def _extract_bnodes(self, bnode):
         return {'bnode_' + k : self._nodepts[v] for k, v in bnode.items()}
+    
+
+def reorder(mshm, rank=0):
+    # Split connectivity
+    lhs, rhs = mshm['con_p{}'.format(rank)].astype('U4,i4,i1,i1')
+
+    # Collect number of elements
+    nele_map = {k.split('_')[1]: len(mshm[k]) for k in mshm 
+                if k.startswith('elm') and k.endswith('p{}'.format(rank))}
+        
+    # Constrcut graph
+    graphs = construct_ele_graph(nele_map, lhs, rhs)
+
+    mapper = {}
+    for t, graph in graphs.items():
+        # reverse Cuthill MacKee reordering
+        try:
+            # By Scipy
+            mapper[t] = _rcm_by_scipy(graph)
+        except:
+            # By NetworkX
+            mapper[t] = _rcm_by_nx(graph)
+
+    # Update DB
+    for etype in nele_map:
+        # Upate elm /spt
+        elm = mshm['elm_{}_p{}'.format(etype, rank)]
+        mshm['elm_{}_p{}'.format(etype, rank)] = elm[mapper[etype]]
+
+        spt = mshm['spt_{}_p{}'.format(etype, rank)]
+        mshm['spt_{}_p{}'.format(etype, rank)] = spt[:, mapper[etype]]
+
+        unmapper = np.argsort(mapper[etype])
+        
+        # Update cons (local)
+        _update_con(mshm['con_p{}'.format(rank)][0], etype, unmapper)
+        _update_con(mshm['con_p{}'.format(rank)][1], etype, unmapper)
+
+        # Update bcons and con_pxpy
+        for name in mshm:
+            if name.startswith('bcon') and name.endswith('p{}'.format(rank)):
+                _update_con(mshm[name], etype, unmapper)
+
+            if name.startswith('con_p{}p'.format(rank)):
+                _update_con(mshm[name], etype, unmapper)
+
+        # Update vtx
+        _update_con(mshm['vtx_p{}'.format(rank)], etype, unmapper)
+
+    return mapper
+
+
+def _rcm_by_scipy(graph):
+    # Use Scipy sparse packages
+    from scipy import sparse
+    from scipy.sparse.csgraph import reverse_cuthill_mckee
+
+    indices, indptr = graph['indices'], graph['indptr']
+    nm = len(indptr) - 1
+
+    # Convert graph to sparse matrix
+    mtx = sparse.csr_matrix(
+            (np.ones_like(indices), indices, indptr),
+            shape=(nm,nm)
+        )
+
+    return reverse_cuthill_mckee(mtx)
+
+
+def _rcm_by_nx(graph):
+    # Use networkx package
+    import networkx as nx
+    from networkx.utils import reverse_cuthill_mckee_ordering as reverse_cuthill_mckee
+
+    indices, indptr = graph['indices'], graph['indptr']
+
+    # Build graph
+    G = nx.Graph()
+
+    # Add connectivity (edge)
+    for row in range(len(indptr) - 1):
+        start = indptr[row]
+        end = indptr[row + 1]
+        cols = indices[start:end]
+
+        for col in cols:
+            G.add_edge(row, col)
+    
+    return np.array(list(reverse_cuthill_mckee(G)))
+
+
+def construct_ele_graph(nele_map, lhs, rhs):
+    graph = {}
+
+    # Construct connectivity (fact to ele)
+    con = np.hstack([[lhs, rhs], [rhs, lhs]])[['f0', 'f1', 'f2']]
+
+    for t, neles in nele_map.items():
+        mask = (con['f0'][0] == t) & (con['f0'][1] == t)
+
+        if np.any(mask):    
+            # Get local connectiviy for each element
+            lcon = con[:, mask]
+            
+            # Reorder w.r.t. left
+            idx = np.lexsort([lcon['f2'][0], lcon['f1'][0]])
+            l, r = lcon[:, idx]
+
+            # Get offset (address array)
+            tab = np.where(l['f1'][1:] != l['f1'][:-1])[0]
+            off = np.concatenate([[0], tab + 1, [len(l)]])
+            
+            # data
+            data = r['f1'].copy()
+
+            # Rearrange indptr
+            ind = np.zeros(neles, dtype=int)
+            ind[l['f1'][off[:-1]]] = np.diff(off)
+            indptr = np.concatenate([[0], np.cumsum(ind)])
+        else:                
+            # Null graph
+            indptr = np.zeros(neles+1, dtype=int)
+            data = np.array([], dtype=int)
+
+        graph[t] = {'indptr' : indptr, 'indices' : data}
+
+    return graph
+
+
+def _update_con(lhs, etype, mapper):
+    mask = lhs['f0'] == etype.encode()
+    f1 = lhs[mask]['f1']
+    lhs['f1'][mask] = mapper[f1]

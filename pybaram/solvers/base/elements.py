@@ -107,29 +107,6 @@ class BaseElements:
 
         return color
 
-    def reordering(self):
-        try:
-            # Use Scipy sparse packages
-            from scipy import sparse
-            from scipy.sparse.csgraph import reverse_cuthill_mckee
-
-            # Convert graph to csr sparse matrix    
-            graph = self.graph
-            mtx = sparse.csr_matrix(
-                (np.ones_like(graph['indices']), graph['indices'], graph['indptr'])
-            )
-
-            # reverse Cuthill MacKee reordering
-            mapping = reverse_cuthill_mckee(mtx)
-            unmapping = np.argsort(mapping)
-
-        except:
-            # If Scipy is not existed
-            mapping = np.arange(self.neles, dtype=int)
-            unmapping = np.arange(self.neles, dtype=int)
-
-        return mapping, unmapping
-
     def set_ics_from_cfg(self):
         xc = self.geom.xc(self.eles).T
 

@@ -56,6 +56,9 @@ class METISPartition:
         self.partition_vtx(msh, newm, mapper)
         self.copy_nodes(msh, newm)
 
+        # Re-order mesh
+        mapper = self.reoder_rank(newm, npart, mapper)
+
         # Assign new UUID
         newm['mesh_uuid'] = np.array(str(uuid.uuid4()), dtype='S')
 
@@ -298,17 +301,33 @@ class METISPartition:
             for p in np.unique(lmap['rank']):
                 # Mask for the rank
                 mask = lmap['rank'] == p
+                idx = lmap['local'][mask]
 
                 # Save elm for each rank
-                news['soln_{}_p{}'.format(t, p)] = sol[:, mask]
+                news['soln_{}_p{}'.format(t, p)] = sol[:, mask][:, idx]
 
                 if is_aux:
-                    news['aux_{}_p{}'.format(t, p)] = aux[:, mask]
+                    news['aux_{}_p{}'.format(t, p)] = aux[:, mask][:, idx]
 
         # Save new solutioj
         with h5py.File(solf, 'w') as f:
             for k, v in news.items():
                 f[k] = v
+
+    def reoder_rank(self, newm, npart, mapper):
+        from pybaram.readers.base import reorder
+
+        for rank in range(npart):
+            # Reorder Local mesh
+            lmapper = reorder(newm, rank)
+
+            # Update mapper local address
+            for etype, mapping in lmapper.items():
+                mask = mapper[etype]['rank'] == rank
+                idx = mapper[etype]['local'][mask]
+                mapper[etype]['local'][mask] = mapping[idx]
+
+        return mapper
 
     def _metis_part(self, npart, etypes, nele, elms):
         # Linked list of elms
