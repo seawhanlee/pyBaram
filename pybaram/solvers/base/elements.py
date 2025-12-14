@@ -121,9 +121,12 @@ class BaseElements:
         for i in range(self.nvars):
             self._ics[i] = ics[i]
 
-    def set_ics_from_sol(self, sol):
+    def set_ics_from_sol(self, sol, aux=None):
         # Just copy provided solution array
         self._ics = sol.astype(float)
+
+        if aux is not None:
+            self._aux = aux.astype(float)
 
     @property
     @fc.lru_cache()

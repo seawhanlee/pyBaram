@@ -12,3 +12,6 @@ class NativeReader(object):
 
     def __iter__(self):
         return self._file.__iter__()
+    
+    def close(self):
+        self._file.close()
