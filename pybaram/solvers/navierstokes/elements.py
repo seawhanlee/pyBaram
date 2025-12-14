@@ -103,8 +103,15 @@ class NavierStokesElements(BaseAdvecDiffElements, ViscousFluidElements):
         nauxvars = len(self.auxvars)
         self.aux = aux = np.empty((nauxvars, self.neles))
         
-        # Viscosity
+        # Assign aux variable
         self.mu = aux[0]
+
+        if hasattr(self, "_aux"):
+            self.aux[:] = self._aux
+            delattr(self, "_aux")
+            is_aux_initialized = True
+        else:
+            is_aux_initialized = False
 
         if impl_op == 'spectral-radius':
             # Spectral radius
@@ -117,8 +124,9 @@ class NavierStokesElements(BaseAdvecDiffElements, ViscousFluidElements):
         # Update arguments of post kerenl
         self.post.update_args(self.upts_in, self.mu)
 
-        # Initialize viscosity
-        self.post()
+        if not is_aux_initialized:
+            # Initialize viscosity
+            self.post()
 
         # Kernel to compute timestep
         self.timestep = Kernel(self._make_timestep(),

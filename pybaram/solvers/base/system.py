@@ -78,7 +78,14 @@ class BaseSystem:
         if soln:
             for k, ele in elemap.items():
                 sol = soln['soln_{}_p{}'.format(k, rank)]
-                ele.set_ics_from_sol(sol)
+
+                # Check aux variable is in solution or not
+                if 'aux_{}_p{}'.format(k, rank) in soln:
+                    aux = soln['aux_{}_p{}'.format(k, rank)]
+                else:
+                    aux = None
+
+                ele.set_ics_from_sol(sol, aux)
         else:
             eles.set_ics_from_cfg()
 

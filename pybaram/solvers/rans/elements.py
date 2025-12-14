@@ -21,15 +21,18 @@ class RANSElements(BaseAdvecDiffElements):
         nauxvars = len(self.auxvars)
         self.aux = aux = np.empty((nauxvars, self.neles))
 
-        # Compute wall distance
-        self.ydist = aux[0]
-        self._wall_distance(xw, self.ydist)
+        # Assign aux variable
+        self.ydist, self.mu, self.mut = aux
+
+        if hasattr(self, "_aux"):
+            self.aux[:] = self._aux
+            delattr(self, "_aux")
+            is_aux_initialized = True
+        else:
+            is_aux_initialized = False
 
         # Call paraent method
         super().construct_kernels(vertex, nreg)
-
-        # Viscosity
-        self.mu, self.mut = aux[1], aux[2]
 
         if impl_op == 'spectral-radius':
             # Spectral radius (flow and turbulent model)
@@ -46,8 +49,12 @@ class RANSElements(BaseAdvecDiffElements):
         # Update arguments of post kerenl
         self.post.update_args(self.upts_in, self.grad, self.mu, self.mut)
         
-        # Initialize viscosity
-        self.post()
+        if not is_aux_initialized:
+            # Compute wall distance
+            self._wall_distance(xw, self.ydist)
+            
+            # Initialize viscosity
+            self.post()
 
         # Update arguments of divergence kernel
         self.div_upts.update_args(
