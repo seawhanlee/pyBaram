@@ -564,11 +564,12 @@ def make_ausmpup(cplargs):
         contral = dot(vl, nf, ndims)
         contrar = dot(vr, nf, ndims)
 
-        csl = 2.0*(gamma - 1)/(gamma + 1)*hl
-        csr = 2.0*(gamma - 1)/(gamma + 1)*hr
+        # Critical speed of sound
+        csl2 = 2.0*(gamma - 1)/(gamma + 1)*hl
+        csr2 = 2.0*(gamma - 1)/(gamma + 1)*hr
 
-        ccl = csl*csl/max(contral, csl)
-        ccr = csr*csr/max(-contrar, csr)
+        ccl = csl2/max(contral, np.sqrt(csl2))
+        ccr = csr2/max(-contrar, np.sqrt(csr2))
 
         # Speed of sound at midpoint, mach number
         rhmid = 0.5*(ul[0] + ur[0])
