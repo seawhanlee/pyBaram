@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pybaram"
+authors = [
+    {name = "Jin Seok Park", email = "jinseok.park@inha.ac.kr"},
+    {name = "Namhyoung Kim", email = "knhkse@inha.edu"},
+    {name = "Chaewon Jeong", email = "won0407@inha.edu"},
+]
+description='Compressible CFD solver in Python'
+readme = "README.md"
+requires-python = ">=3.9"
+license = {file = "LICENSE"}
+dependencies = [
+    'h5py >= 2.6',
+    'mpi4py >= 2.0',
+    'numpy >= 1.10',
+    'numba >= 0.5',
+    'tqdm >= 4.0',
+    'scipy >= 1.6',
+]
+dynamic = ["version"]
+
+[project.scripts]
+pybaram = "pybaram.__main__:main"
+
+[project.urls]
+Documentation = "https://aadl_inha.gitlab.io/pyBaram"
+Repository = "https://gitlab.com/aadl_inha/pyBaram.git"
+
+[tool.setuptools]
+packages = [
+    'pybaram',
+    'pybaram.api',
+    'pybaram.backends',
+    'pybaram.backends.cpu',
+    'pybaram.integrators',
+    'pybaram.partitions',
+    'pybaram.plugins',
+    'pybaram.readers',
+    'pybaram.solvers',
+    'pybaram.solvers.base',
+    'pybaram.solvers.baseadvec',
+    'pybaram.solvers.baseadvecdiff',
+    'pybaram.solvers.euler',
+    'pybaram.solvers.navierstokes',
+    'pybaram.solvers.rans',
+    'pybaram.solvers.ranssa',
+    'pybaram.solvers.ranskwsst',
+    'pybaram.utils',
+    'pybaram.writers'
+]
+
+[tool.setuptools.dynamic]
+version = {attr = "pybaram._version.__version__"}

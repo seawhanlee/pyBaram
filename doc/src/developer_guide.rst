@@ -7,14 +7,14 @@ Overview of Code Structure
 
 Start
 -----
-``pyBaram`` can be executed using the command `pybaram` which is linked to ``__main__.py``. In `run` or `restart` modes, the command calls `process_common` in the :mod:`pybaram.api.simulation`. module. Here, the integrator object is initiated, and the run method is called to conduct the simulation.
+``pyBaram`` can be executed using the command `pybaram` which is linked to ``__main__.py``. In `run` or `restart` modes, the command calls `process_common` in the :mod:`pybaram.api.simulation` module. Here, the integrator object is initiated, and the run method is called to conduct the simulation.
 
 Integrators
 -----------
 The Integrator object conducts time integration of the discretized equations. When the ``integrator`` is initiated, it invokes the `system` class in the :mod:`pybaram.solvers` module to compute the right-hand side term of the FVM. Additionally, plugins are invoked by this integrator object for post-processing.
 
 ``pybaram`` can conduct both steady and unsteady simulations, and they are implemented
-in the :mod:`pybaram.integrators.steady` and the :mod:`pybaram.integrators.unsteady` modules, respectively. Here, the `construct_stage` method generates the kernels for time integration. For unsteady simulation, explicit Runge-Kutta schemes can be applied, as implemented below.
+in the :mod:`pybaram.integrators.steady` and the :mod:`pybaram.integrators.unsteady` modules, respectively. Here, the `construct_stage` method assembles and compiles the kernels required for each stage of the time-integration scheme. For unsteady simulation, explicit Runge-Kutta schemes can be applied, as implemented below.
 
 .. admonition:: TVD-RK3
    :class: dropdown
@@ -109,12 +109,12 @@ The class hierarchy of the ``system`` can be depicted as follows:
                          pybaram.solvers.ranssa.system
                          pybaram.solvers.navierstokes.system
                          pybaram.solvers.euler.system
-    :top-classes: pybarm.solver.base.elements.BaseSystem
+    :top-classes: pybaram.solver.base.elements.BaseSystem
     :parts: 1 
 
 |
 
-* ``BaseSystem`` : initiates objects and generates kernels from these object
+* ``BaseSystem`` : initiates objects and generates kernels from these objects
 
 * ``BaseAdvecSystem`` : `rhside` method for advection problems, such as Euler systems.
 
@@ -130,7 +130,7 @@ The class hierarchy of the ``system`` can be depicted as follows:
 
         .. automethod:: pybaram.solvers.baseadvecdiff.system.BaseAdvecDiffSystem.rhside
 
-* ``RANSSystem`` : initiates objects and generates kernels from these object for RANS simulation
+* ``RANSSystem`` : initiates objects and generates kernels from these objects for RANS simulation
 
 
 Elements
@@ -139,7 +139,7 @@ The ``elemenets`` object stores solution and other arrays. It also generates ker
 
 .. inheritance-diagram:: pybaram.solvers.navierstokes.elements
                          pybaram.solvers.euler.elements
-    :top-classes: pybarm.solver.base.elements.BaseElements
+    :top-classes: pybaram.solver.base.elements.BaseElements
     :parts: 1 
 
 * ``BaseElements`` : defines geometry and related properties
@@ -160,7 +160,7 @@ For RANS simulation, class hierarchy can be depicted as follows:
 
 .. inheritance-diagram:: pybaram.solvers.ranskwsst.elements
                          pybaram.solvers.ranssa.elements
-    :top-classes: pybarm.solver.base.elements.BaseElements
+    :top-classes: pybaram.solver.base.elements.BaseElements
     :parts: 1
 
 * ``RANSElements`` : common kernels for RANS computation
@@ -181,7 +181,7 @@ The ``inters`` objects generate kernels looping over interfaces. There are three
 .. inheritance-diagram:: pybaram.solvers.base.BaseIntInters
                          pybaram.solvers.base.BaseBCInters
                          pybaram.solvers.base.BaseMPIInters
-    :top-classes: pybarm.solver.base.BaseInters
+    :top-classes: pybaram.solver.base.BaseInters
     :parts: 1
 
 * ``BaseInters`` : computes geometrical properties and defines view to refer array in ``elements``
@@ -200,16 +200,16 @@ The class hierarchy of internal interfaces can be depicted as follows:
                          pybaram.solvers.ranssa.inters.RANSSAIntInters
                          pybaram.solvers.navierstokes.inters.NavierStokesIntInters
                          pybaram.solvers.euler.inters.EulerIntInters
-    :top-classes: pybarm.solver.base.elements.BaseIntInters
+    :top-classes: pybaram.solver.base.elements.BaseIntInters
     :parts: 1 
 
 * ``BaseAdvecIntInters`` : common kernel to compute :math:`\Delta U_{fi}`
 
 * ``BaseAdvecDiffIntInters`` : common kernel to compute :math:`\nabla U_f`
 
-* ``EulerIntInters`` : kerenl to compute inviscid flux
+* ``EulerIntInters`` : kernel to compute inviscid flux
 
-* ``NavierStokesIntInters`` : kerenl to compute viscous flux
+* ``NavierStokesIntInters`` : kernel to compute viscous flux
 
 * ``RANSIntInters`` : kernel to compute RANS flux
 
@@ -223,7 +223,7 @@ The class hierarchy of physical boundary interfaces can be depicted as follows:
                          pybaram.solvers.ranssa.inters.RANSSABCInters
                          pybaram.solvers.navierstokes.inters.NavierStokesBCInters
                          pybaram.solvers.euler.inters.EulerBCInters
-    :top-classes: pybarm.solver.base.elements.BaseBCInters
+    :top-classes: pybaram.solver.base.elements.BaseBCInters
     :parts: 1 
 
 The overall structure and role of these classes are the same as internal interfaces. The  ``construct_bc`` method in ``BaseAdvecInters`` compiles the boundary condition function, and specific formulations are implemented in this class. For example, the hierarchy of boundary conditions for Euler equations can be depicted as follows:
@@ -242,7 +242,7 @@ The class hierarchy of MPI interfaces can be depicted as follows:
                          pybaram.solvers.ranssa.inters.RANSSAMPIInters
                          pybaram.solvers.navierstokes.inters.NavierStokesMPIInters
                          pybaram.solvers.euler.inters.EulerMPIInters
-    :top-classes: pybarm.solver.base.elements.BaseMPIInters
+    :top-classes: pybaram.solver.base.elements.BaseMPIInters
     :parts: 1 
 
 The overall structure and role of these class are the same as internal interfaces.
@@ -257,7 +257,7 @@ The ``vertex`` object generates kernel looping over vertex. The class hierarchy 
 
 * ``BaseVertex`` : view to refer array in ``elements``
 
-* ``BaseVertex`` : kernel to find extreme values at vertex
+* ``BaseAdvecVertex`` : kernel to find extreme values at vertex
 
 Plugins
 -------
@@ -267,7 +267,7 @@ The ``plugin`` modules handle the post-processing after each iteration or a fixe
                          pybaram.plugins.writer
                          pybaram.plugins.force
                          pybaram.plugins.surfint
-    :top-classes: pybarm.plugins.base.BasePlugin
+    :top-classes: pybaram.plugins.base.BasePlugin
     :parts: 1 
 
 * ``StatsPlugin`` : collect statistics (time step or residual)
@@ -282,8 +282,8 @@ Backends
 --------
 The :mod:`pybaram.backends` module accelerates the pure Python loop and manages the execution of kernels. Currently, only the ``CPUBackend`` is implemented for serial and parallel computation using CPU. This module provides two main features; generating kernels and handling data types for executions.
 
-Compile Kernel
-**************
+Kernel Compilation
+******************
 In the ``integrators`` and the ``solvers`` modules, pure Python functions are defined. These functions are compiled as kernels using loop generators in the :mod:`pybaram.backends.cpu.loops` module. The Numba JIT compiler is then called, and the pure Python functions are compiled to construct serial or parallel loops.
 
 Data Types for Execution
@@ -293,8 +293,8 @@ Currently, four data types are defined in the :mod:`pybaram.backends.types`.
 .. automodule:: pybaram.backends.types
     :members:
 
-Variables
-----------
+Core Variables
+--------------
 The name of the variable ``pyBaram`` may seem somewhat condensed. The table below provides a summary of mathematical symbols and the corresponding meanings of major arrays:
 
 .. list-table:: Notation of Variables in `pyBaram`
@@ -304,9 +304,9 @@ The name of the variable ``pyBaram`` may seem somewhat condensed. The table belo
    * - Name
      - Symbol
      - Meaning
-     - N/A
+     - Notes
    * - upts
-     - :math:`\bar{U}_i``
+     - :math:`\bar{U}_i`
      - array of cell-averaged state variable vector
      -     
    * - fpts
@@ -364,7 +364,7 @@ The allocation of local arrays was hoisted due to limited functionalities for de
   .. method:: _make_flux
 
 The generated kernel is constructed by `construct_kernels` method of ``BaseAdvecIntInters`` 
-in :mod:`pybaram.solvers.baseadvec`. When this kernel is called, the reconstructed values at the face
+in :mod:`pybaram.solvers.baseadvec.inters`. When this kernel is called, the reconstructed values at the face
 :math:`{U}_f^{\pm}` is used as static argument. 
 Thus, ``Kernel`` data type binds this compiled kernel and the static arguments. 
 When ``Kernel`` object is called, dynamic arguments can be also provided.
@@ -376,7 +376,7 @@ All arguments are parsed, then the compiled kernel is executed.
 
 Non-blocking Send/Receive 
 -------------------------
-``pyBaram`` exploits the ``mpi4py`` ppackage for MPI communication. Non-blocking communications are employed and overlapped with computing kernels. These methods are implemented in the ``MPIInters`` class.
+``pyBaram`` exploits the ``mpi4py`` package for MPI communication. Non-blocking communications are employed and overlapped with computing kernels. These methods are implemented in the ``MPIInters`` class.
 
 In the `construct_kernels` method, non-blocking send and receive kernels, along with their requests, are constructed using the `_make_send` and `_make_recv` methods. Buffers are passed to these methods, and the `_sendrecv`` method is invoked. In this method, the `start` function is returned. When this function is called with a `Queue` instance in `rhside`, the MPI request for this communication is registered in the `Queue` instance, and the non-blocking communication starts. This communication is finalized when the `sync` method in the `Queue` instance is called.
 

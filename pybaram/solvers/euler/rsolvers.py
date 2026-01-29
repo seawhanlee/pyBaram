@@ -10,7 +10,7 @@ def get_rsolver(name, be, cplargs):
     """
     docstring
     """
-    fname = re.sub(r'\+', 'p', name)
+    fname = re.sub(r"\+", 'p', name)
     fname = re.sub('-', '_', fname)
     flux = eval('make_' + fname)(cplargs)
 

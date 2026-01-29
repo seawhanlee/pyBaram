@@ -254,31 +254,30 @@ class NodesAssembler(object):
         self._etype_map = etype_map
 
     def _fluid_elm(self):
+        # Element DB (elm) and points (spt)
         elm = {}
         spt = {}
-        bnode = defaultdict(list)
         for (etype, pent), ele in self._elenodes.items():
             petype = self._etype_map[etype][0]
 
             if pent == self._felespent:
                 elm['elm_{}_p0'.format(petype)] = ele
                 spt['spt_{}_p0'.format(petype)] = self._get_spt_ele(petype, ele)
-            elif pent in self._bfacespents:
-                bname = self._bfacespents[pent]
-                bnode[bname].append(np.unique(ele.ravel()))
 
-        bnode = {k : np.concatenate(v) for k, v in bnode.items()}
-
-        return elm, spt, bnode
+        return elm, spt
 
     def get_nodes(self):
+        # Node points array
         vals = self._nodepts[1:]
-
         ret = {'nodes': vals}
-        elm, spt, bnode = self._fluid_elm()
+
+        # Collect ELments and points
+        elm, spt = self._fluid_elm()
         ret.update(elm)
         ret.update(spt)
-        ret.update(self._extract_bnodes(bnode))
+
+        # Collect triangulations of boundary
+        ret.update(self._extract_btri())
 
         return ret
 
@@ -290,8 +289,33 @@ class NodesAssembler(object):
         arr = nodepts[ele].swapaxes(0, 1)
         return arr[..., :ndim]
 
-    def _extract_bnodes(self, bnode):
-        return {'bnode_' + k : self._nodepts[v] for k, v in bnode.items()}
+    def _extract_btri(self):
+        # Triangulation of boundary surfaces
+        btri = defaultdict(list)
+
+        for (etype, pent), ele in self._elenodes.items():
+            petype = self._etype_map[etype][0]
+            if pent in self._bfacespents:
+                bname = self._bfacespents[pent]
+
+                nd_ele = np.array([self._nodepts[v] for v in ele])
+
+                if petype == 'quad':
+                    # Pad the center point
+                    nd_ele = np.hstack([nd_ele, np.average(nd_ele, axis=1)[:, None]])
+
+                    # Split a quad face as four triangular faces
+                    btri[bname].append(nd_ele[:,(0, 1, 4)])
+                    btri[bname].append(nd_ele[:,(1, 2, 4)])
+                    btri[bname].append(nd_ele[:,(2, 3, 4)])
+                    btri[bname].append(nd_ele[:,(3, 0, 4)])
+                else:
+                    btri[bname].append(nd_ele)
+
+        # Sort the triangulations per surface
+        btri = {'btri_{}'.format(k) : np.vstack(v) for k, v in btri.items()}
+
+        return btri
     
 
 def reorder(mshm, rank=0):

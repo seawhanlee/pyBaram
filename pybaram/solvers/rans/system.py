@@ -14,58 +14,31 @@ class RANSSystem(BaseAdvecDiffSystem):
     _bcinters_cls = RANSBCInters
     _mpiinters_cls = RANSMPIInters
 
-    def __init__(self, be, cfg, msh, soln, comm, nreg, impl_op):
-        # Save parallel infos
-        self._comm = comm
-        self.rank = rank = comm.rank
+    def load_solns(self, msh, soln, elemap, cfg, rank):
+        # Get initial solution
+        if soln:
+            for k, ele in elemap.items():
+                sol = soln['soln_{}_p{}'.format(k, rank)]
+                aux = soln['aux_{}_p{}'.format(k, rank)]
 
-        # Load elements
-        self.eles, elemap = self.load_elements(msh, soln, be, cfg, rank)
-        self.ndims = next(iter(self.eles)).ndims
+                ele.set_ics_from_sol(sol, aux)
+        else:
+            # Load btri
+            btri = self.load_btri(msh, cfg, rank)
 
-        # load interfaces
-        self.iint = self.load_int_inters(msh, be, cfg, rank, elemap)
+            # Initialize solution
+            self.eles.set_ics_from_cfg(btri)
 
-        # load bc
-        self.bint, self.vint = self.load_bc_inters(msh, be, cfg, rank, elemap)
-
-        # load mpiint
-        self.mpiint = self.load_mpi_inters(msh, be, cfg, rank, elemap)
-
-        # Load vertex
-        self.vertex = vertex = self.load_vertex(msh, be, cfg, rank, elemap)
-
-        # Load bnode
-        bnode = self.load_bnode(msh, cfg, rank)
-
-        # Construct kerenls
-        self.eles.construct_kernels(vertex, bnode, nreg, impl_op)
-        self.iint.construct_kernels(elemap, impl_op)
-        self.bint.construct_kernels(elemap, impl_op)
-
-        # Check reconstructed or not
-        self._is_recon = (cfg.getint('solver', 'order', 1) > 1)
-
-        if self.mpiint:
-            # Construct MPI kernels
-            self.mpiint.construct_kernels(elemap, impl_op)
-
-        # Construct Vertex kernels
-        self.vertex.construct_kernels(elemap)
-
-        # Construct queue
-        self._queue = Queue()
-
-    def load_bnode(self, msh, cfg, rank):
+    def load_btri(self, msh, cfg, rank):
         is_loaded = []
 
         if rank == 0:
-            bnode = []
+            btri = []
             for key in msh:
                 m = re.match(r'bcon_([a-z_\d]+)_p([\d]+)$', key)
 
                 if m:
-                    # Collect boundary nodes
+                    # Collect boundary triangles
                     bname = m.group(1)
                     if bname not in is_loaded:
                         is_loaded.append(bname)
@@ -73,12 +46,12 @@ class RANSSystem(BaseAdvecDiffSystem):
                         bctype = cfg.get(bcsect, 'type')
 
                         if bctype in ['adia-wall', 'isotherm-wall']:
-                            bnode.append(msh['bnode_' + bname][:,:self.ndims])
+                            btri.append(msh['btri_' + bname][:,:self.ndims])
             
-            bnode = np.vstack(bnode)
+            btri = np.vstack(btri)[:,:,:self.ndims]
         else:
-            bnode = None
+            btri = None
 
-        bnode = self._comm.bcast(bnode, root=0)
+        btri = self._comm.bcast(btri, root=0)
 
-        return bnode
+        return btri

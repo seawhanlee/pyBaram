@@ -3,6 +3,7 @@ from mpi4py import MPI
 
 
 import numpy as np
+import re
 
 from pybaram.plugins.base import BasePlugin, csv_write
 from pybaram.utils.np import npeval
@@ -29,6 +30,15 @@ class SurfIntPlugin(BasePlugin):
         self.ndims = ndims = intg.sys.ndims
         self._nvec = ['n{}'.format(e) for e in 'xyz'[:ndims]]
 
+        # Check expr requires coodinate or not
+        self._needed_xf = False
+        rxyz = "[{}]".format(','.join('xyz'[:ndims]))
+        p = re.compile(r"(?:^|\W)" + rxyz)
+        for expr in self._exprs:
+            m = p.search(expr)
+            if m:
+                self._needed_xf = True
+
         # Map as {BC type : Boundary interface objects and Virtual interface objects}
         bcmap = {bc.bctype: bc for bc in intg.sys.bint}
         bcmap.update({vr.bctype: vr for vr in intg.sys.vint})
@@ -41,12 +51,17 @@ class SurfIntPlugin(BasePlugin):
             bc = bcmap[suffix]
             t, e, _ = bc._lidx
             mag, vec = bc._mag_snorm, bc._vec_snorm
+            
+            if self._needed_xf:
+                xf = bc.xf
+            else:
+                xf = None
 
             for i in np.unique(t):
                 mask = (t == i)
                 eidx = e[mask]
                 nvec, nmag = vec[:, mask], mag[mask]
-                bcinfo[i] = (eidx, nvec, nmag)
+                bcinfo[i] = (eidx, nvec, nmag, xf)
                 area += np.sum(nmag)
 
         # Compute surface area at boundary
@@ -95,7 +110,7 @@ class SurfIntPlugin(BasePlugin):
         solns = list(intg.curr_soln)
 
         dist = []
-        for i, (eidx, nvec, nmag) in self._bcinfo.items():
+        for i, (eidx, nvec, nmag, xf) in self._bcinfo.items():
             # Convert Primevars
             soln = solns[i]
             pn = eles[i].primevars
@@ -104,6 +119,10 @@ class SurfIntPlugin(BasePlugin):
             # Compute variables using expressions
             subs = {n : v for n,v in zip(pn, pv)}
             subs.update({n : v for n, v in zip(self._nvec, nvec)})
+
+            if self._needed_xf:
+                subs.update({n : v for n, v in zip('xyz'[:self.ndims], xf)})
+
             subs.update(self._const)
             var_at = np.array([npeval(expr, subs) for expr in self._exprs])
             dist.append(var_at*nmag)

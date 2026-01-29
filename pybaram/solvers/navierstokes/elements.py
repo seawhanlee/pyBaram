@@ -52,6 +52,9 @@ class ViscousFluidElements(FluidElements):
                 except:
                     raise ValueError("Invalid reference viscosty: {}".fromat(muref_expr))
                 
+            # Save muref in constants
+            self._const['mu'] = muref
+                
             # Free-stream enthalpy
             CpTf = self.cfg.getexpr(sect, 'cptf', self._const,'none')
             if CpTf == 'none':

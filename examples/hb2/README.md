@@ -1,3 +1,3 @@
 Mesh file
 ---------
-You can download the mesh file from this [link](https://drive.google.com/uc?export=view&id=1hmSf49psT880bOi7qyKMaRRk3EwynLQR)
+You can download the mesh file from this [link](https://drive.google.com/file/d/1S5w4QfxIzi2Z74Tnh9wZPBT-OQSclq8D)
