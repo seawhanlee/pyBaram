@@ -23,7 +23,7 @@ class BaseSystem:
         self.rank = rank = comm.rank
 
         # Load elements
-        self.eles, elemap = self.load_elements(msh, soln, be, cfg, rank)
+        self.eles, elemap = self.load_elements(msh, be, cfg, rank)
         self.ndims = next(iter(self.eles)).ndims
 
         # load interfaces
@@ -37,6 +37,9 @@ class BaseSystem:
 
         # Load vertex
         self.vertex = vertex = self.load_vertex(msh, be, cfg, rank, elemap)
+
+        # Load solns
+        self.load_solns(msh, soln, elemap, cfg, rank)
 
         # Construct kerenls
         self.eles.construct_kernels(vertex, nreg, impl_op)
@@ -58,7 +61,7 @@ class BaseSystem:
         # Construct queue
         self._queue = Queue()
 
-    def load_elements(self, msh, soln, be, cfg, rank):
+    def load_elements(self, msh, be, cfg, rank):
         elemap = OrderedDict()
         eles = ProxyList()
 
@@ -74,6 +77,9 @@ class BaseSystem:
                 elemap[etype] = ele
                 eles.append(ele)
 
+        return eles, elemap
+    
+    def load_solns(self, msh, soln, elemap, cfg, rank):
         # Get initial solution
         if soln:
             for k, ele in elemap.items():
@@ -87,9 +93,7 @@ class BaseSystem:
 
                 ele.set_ics_from_sol(sol, aux)
         else:
-            eles.set_ics_from_cfg()
-
-        return eles, elemap
+            self.eles.set_ics_from_cfg()
 
     def load_int_inters(self, msh, be, cfg, rank, elemap):
         key = 'con_p{0}'.format(rank)

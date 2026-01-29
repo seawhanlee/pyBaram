@@ -2,6 +2,7 @@
 from pybaram.solvers.baseadvecdiff import BaseAdvecDiffElements
 from pybaram.backends.types import Kernel
 from pybaram.utils.nb import dot
+from pybaram.utils.np import npeval
 
 import numpy as np
 
@@ -16,7 +17,25 @@ class RANSElements(BaseAdvecDiffElements):
         cfg.get('constants', 'pmin', '1e-15')
         self._const = cfg.items('constants')
 
-    def construct_kernels(self, vertex, xw, nreg, impl_op):
+    def set_ics_from_cfg(self, btri):
+        xc = self.geom.xc(self.eles).T
+
+        # Calculate wall distance
+        self._ydist = ydist = self._wall_distance(btri)
+
+        # Parse initial condition from expressions
+        subs = dict(zip('xyz', xc))
+        subs.update({'ydist' : ydist})
+        ics = [npeval(self.cfg.getexpr('soln-ics', v, self._const), subs)
+               for v in self.primevars]
+        ics = self.prim_to_conv(ics, self.cfg)
+
+        # Allocate numpy array and copy parsed values
+        self._ics = np.empty((self.nvars, self.neles))
+        for i in range(self.nvars):
+            self._ics[i] = ics[i]        
+
+    def construct_kernels(self, vertex, nreg, impl_op):
         # Aux array
         nauxvars = len(self.auxvars)
         self.aux = aux = np.empty((nauxvars, self.neles))
@@ -29,6 +48,8 @@ class RANSElements(BaseAdvecDiffElements):
             delattr(self, "_aux")
             is_aux_initialized = True
         else:
+            self.aux[0] = self._ydist
+            delattr(self, '_ydist')
             is_aux_initialized = False
 
         # Call paraent method
@@ -49,10 +70,7 @@ class RANSElements(BaseAdvecDiffElements):
         # Update arguments of post kerenl
         self.post.update_args(self.upts_in, self.grad, self.mu, self.mut)
         
-        if not is_aux_initialized:
-            # Compute wall distance
-            self._wall_distance(xw, self.ydist)
-            
+        if not is_aux_initialized:            
             # Initialize viscosity
             self.post()
 
@@ -66,64 +84,75 @@ class RANSElements(BaseAdvecDiffElements):
         self.timestep = Kernel(self._make_timestep(),
                                self.upts_in, self.mu, self.mut, self.dt)
 
-    def _wall_distance(self, xw, wdist):
-        # Compute wall distance
-        try:
-            # KDtree version 
-            try:
-                # pykdtree
-                self._wall_distance_kdtree_pykdtree(xw, wdist)
-            except:
-                # Scipy
-                self._wall_distance_kdtree_scipy(xw, wdist)
-        except:
-            # Brute-force version
-            self._wall_distance_bf(xw, wdist)
+    def _wall_distance(self, btri):
+        wall_dist = np.empty(self.neles)
 
-    def _wall_distance_bf(self, xw, wdist):
-        # Dimensions and constants
-        nf, ne, nd = self.eles.shape
-        nw = xw.shape[0]
-        eles = self.eles
-        rcp_nf = 1.0 / nf
+        # Define wall distance function
+        if self.ndims == 2:
+            from pybaram.utils.nb import dist2d_at
 
-        # Guess maximum distance
-        xmax = 2*(eles.max() - eles.min())
+            def distf(i_begin, i_end, is_masked, idx, xw, xc, wdist):       
+                for _i in range(i_begin, i_end):
+                    # Cell index
+                    k = is_masked[_i]
+                    for _j in range(5):
+                        # Candidates of nearest wall index
+                        j = idx[_i, _j]
+                        status, distj = dist2d_at(xw[j][0], xw[j][1], xc[k])
 
-        def _cal_wdist(i_begin, i_end, wdist):
-            # Brute-force searching
-            for idx in range(i_begin, i_end):
-                wd_ele = 0
-                for jdx in range(nf):
-                    # for all node points
-                    xc = eles[jdx, idx]
+                        if _j == 0:
+                            dist = distj
+                        else:
+                            dist = min(dist, distj)
+
+                        if status == 0:
+                            break
+
+                    # Update wall distance
+                    wdist[k] = dist
+
+        elif self.ndims == 3:
+            from pybaram.utils.nb import dist3d_at
+
+            def distf(i_begin, i_end, is_masked, idx, xw, xc, wdist):       
+                nj = idx.shape[1]
+                for _i in range(i_begin, i_end):
+                    # Cell index
+                    k = is_masked[_i]
+                    for _j in range(nj):
+                        # Candidates of nearest wall index
+                        j = idx[_i, _j]
+
+                        status, distj = dist3d_at(xw[j][0], xw[j][1], xw[j][2], xc[k])
+
+                        if _j == 0:
+                            dist = distj
+                        else:
+                            dist = min(dist, distj)
+
+                        if status == 0:
+                            break
                     
-                    # Compute minimum wall distance for each node
-                    wd_node = xmax
-                    for kdx in range(nw):
-                        xwi = xw[kdx]                      
-                        
-                        # Compute distance
-                        dx = 0
-                        for i in range(nd):
-                            dx += (xwi[i] - xc[i])**2
+                    # Update wall distance
+                    wdist[k] = dist
 
-                        dx = np.sqrt(dx)
-                        wd_node = min(dx, wd_node)
+        # Compute wall distance using KDtree version 
+        try:
+            # pykdtree
+            self._wall_distance_kdtree_pykdtree(btri, wall_dist, distf)
+        except:
+            # Scipy
+            self._wall_distance_kdtree_scipy(btri, wall_dist, distf)
 
-                    # Averaging for cell
-                    wd_ele += wd_node
-
-                wd_ele *= rcp_nf
-                wdist[idx] = wd_ele
-
-        self.be.make_loop(ne, _cal_wdist)(wdist)
+        return wall_dist
     
-    def _wall_distance_kdtree_scipy(self, xw, wdist):
+    def _wall_distance_kdtree_scipy(self, xw, wdist, distf):
         from scipy.spatial import KDTree
+
+        xwc = np.average(xw, axis=1)
         
         # Build Tree data
-        tree = KDTree(xw)
+        tree = KDTree(xwc)
 
         # Check multi-thread or not
         if self.be.multithread == 'single':
@@ -131,22 +160,53 @@ class RANSElements(BaseAdvecDiffElements):
         else:
             workers = -1
 
-        # Compute wall distance from KDtree
-        wdist[:] = np.average(tree.query(self.eles, workers=workers)[0], axis=0)
+        # Fast distance
+        fast_distance, _ = tree.query(self.xc, workers=workers)
+        wdist[:] = fast_distance
+
+        # Threshold (User tunable): 10% of boundary diagonal
+        dxc = np.max(xwc, axis=0) - np.min(xwc, axis=0)
+        threshold = np.sqrt(np.sum(dxc**2))*0.005
+        
+        # Mask if dist < threshhold
+        mask = fast_distance < threshold
+        
+        # Detail check (User tunable)
+        n_neighbor = max(len(xwc) // 1000, 50)
+        _, idx = tree.query(self.xc[mask], k=n_neighbor, workers=workers)
+
+        is_masked = np.where(mask)[0]
+        self.be.make_loop(len(is_masked), distf)(is_masked, idx, xw, self.xc, wdist)
         
         # Delete tree
         del(tree)
 
-    def _wall_distance_kdtree_pykdtree(self, xw, wdist):
+    def _wall_distance_kdtree_pykdtree(self, xw, wdist, distf):
         from pykdtree.kdtree import KDTree
 
+        xwc = np.average(xw, axis=1)
+        
         # Build Tree data
-        tree = KDTree(xw)
+        tree = KDTree(xwc)
 
-        # Compute wall distance from KDtree
-        d, i = tree.query(self.eles.reshape(-1, self.ndims))
-        wdist[:] = np.average(d.reshape(-1, self.neles), axis=0)
+        # Fast distance
+        fast_distance, _ = tree.query(self.xc)
+        wdist[:] = fast_distance
 
+        # Threshold (User tunable): 10% of boundary diagonal
+        dxc = np.max(xwc, axis=0) - np.min(xwc, axis=0)
+        threshold = np.sqrt(np.sum(dxc**2))*0.005
+        
+        # Mask if dist < threshhold
+        mask = fast_distance < threshold
+        
+        # Detail check (User tunable)
+        n_neighbor = max(len(xwc) // 1000, 50)
+        _, idx = tree.query(self.xc[mask], k=n_neighbor)
+
+        is_masked = np.where(mask)[0]
+        self.be.make_loop(len(is_masked), distf)(is_masked, idx, xw, self.xc, wdist)
+        
         # Delete tree
         del(tree)
 

@@ -4,12 +4,12 @@ Theory
 
 Governing Equations
 ===================
-``pyBaram`` can solve convection-diffusion equations, which is written as follows.
+``pyBaram`` can solve convection-diffusion equations, which are written as follows.
 
 .. math::
    \frac{\partial U}{\partial t} + \nabla \cdot (F_c - F_v) = S.
 
-where, :math:`U` are conservative variable vector.
+where :math:`U` is the vector of conservative variables.
 :math:`F_c, F_v` are the convective and viscous flux, respectively.
 :math:`S` is the source vector.
 
@@ -23,7 +23,7 @@ The governing equations of inviscid flow are written as follows.
    \end{bmatrix}
 
 where, :math:`\rho` is density, :math:`u,v,w` are components of velocity vector and
-:math:`e_t` is total specific internal energy. From equation of state, 
+:math:`e_t` is the total specific energy. From equation of state, 
 specific internal energy can be written as follows.
 
 .. math::
@@ -37,7 +37,7 @@ Euler equations have only convective flux, which can be written as follows.
 .. math::
    F_c = \begin{bmatrix}
     \rho u & \rho v & \rho w \\
-    \rho u^2 + p & \rho u v & rho u w \\
+    \rho u^2 + p & \rho u v & \rho u w \\
     \rho u v & \rho v^2 + p & \rho v w \\
     \rho u w & \rho v w & \rho w^2 + p \\
     \rho u h_t & \rho v h_t & \rho w h_t
@@ -68,7 +68,7 @@ where, :math:`\tau` is shear stress, which can be written as follows.
    \tau_{xx} &=  2\mu(u_x - \frac{1}{3}(u_x + v_y + w_z)) \\
    \tau_{xy} &= \mu(v_x + u_y)
 
-:math:`\mu`` is viscosity and :math:`u_x` is derivative of velocity. :math:`\Theta` can be written as follows.
+:math:`\mu` is viscosity and :math:`u_x` is derivative of velocity. Other components of the stress tensor are defined analogously. :math:`\Theta` can be written as follows.
 
 .. math::
    \Theta_x = u \tau_{xx} + v \tau_{xy} + w \tau_{xz} + \frac{\gamma\mu C_v}{Pr} T_x
@@ -85,8 +85,8 @@ RANS Equations
 For RANS (Reynolds-averaged Navier-Stokes) equations, the turbulent viscosity is computed using turbulent model equation. ``pyBaram`` employs two models: the one equation `Spalart-Allmaras model <https://turbmodels.larc.nasa.gov/spalart.html#sa>`_ and the two equation `SST model <https://turbmodels.larc.nasa.gov/spalart.html#sst>`_. With turbulent viscosity :math:`\mu_t`, shear stress in viscous flux can be modified as follows:
 
 .. math::
-   \tau_{xx} &=  2\frac{\mu+\mu_t}{\rho}(u_x - \frac{1}{3}(u_x + v_y + w_z)) \\
-   \tau_{xy} &= \frac{\mu+\mu_t}{\rho}(v_x + u_y)
+   \tau_{xx} &= 2(\mu+\mu_t)(u_x - \frac{1}{3}(u_x + v_y + w_z)) \\
+   \tau_{xy} &= (\mu+\mu_t)(v_x + u_y)
 
 Turbulent thermal conductivity is computed using turbulent Prandtl number :math:`Pr_t`, thus 
 :math:`\Theta` in viscous flux can be modified as follows.
@@ -106,7 +106,7 @@ For each cell, the semi-discrete form of the governing equation can be written a
 where 
 :math:`\bar{U}_i` and :math:`\bar{S}_i` represent the cell-averaged state variable vector
 and source term vector at the :math:`i-th` cell, respectively. 
-:math:`H_c`` and :math:`H_v` denote numerical inviscid and viscous fluxes, respectively. 
+:math:`H_c` and :math:`H_v` denote numerical inviscid and viscous fluxes, respectively. 
 :math:`\bar{U}_f`  and :math:`\nabla U_f` correspond to the face-averaged state and 
 gradient vectors at the :math:`f-th` face, respectively. 
 Furthermore, :math:`n_f` and :math:`\Delta A_f` denote the unit normal vector and area 
@@ -120,7 +120,7 @@ they can be obtained by MUSCL-type reconstruction, as below
 where :math:`\nabla U_i` corresponds to the gradient of the state variables at the :math:`i-th` cell
 and :math:`x_{i,f}` denotes the position vector from cell center to face. 
 Furthermore, :math:`\phi_i` is slope limiter at `i-th` cell for robustly capturing shock discontinuities; 
-:math:`U_f^-` can be computed similarly at the adjacent cell
+:math:`U_f^-` can be computed similarly at the adjacent cell.
 
 The procedures to compute the right-hand side can be summarized as follows:
 
@@ -215,8 +215,8 @@ Source terms are added after divergence of flux.
 * :mod:`pybaram.solvers.ranssa` module generates kernels for Spalart-Allmaras RANS model :cite:`Spalart1994` 
 * :mod:`pybaram.solvers.ranskwsst` module generates kernels for SST RANS model :cite:`Menter1994` 
 
-Time Integrations
-==================
+Time Integration
+=================
 After computing the right-hand side (negative gradient of flux), the solution can be updated through integration over time. Currently, explicit Runge-Kutta schemes :cite:`Martinelli1988,Gottlieb1998` and implicit LU-SGS schemes :cite:`Yoon1988` are implemented. The classes for these integrators are provided in the :mod:`pybaram.integrators` module.
 
 References

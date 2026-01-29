@@ -14,6 +14,8 @@ class METISPartition:
     _wmap = {'quad': 3, 'tri': 2, 'tet': 4, 'pri': 5, 'pyr': 5, 'hex': 6}
 
     def __init__(self, msh, out, npart, sols):
+        self.npart = npart
+
         # Set destination path and file name
         if out.endswith(".pbrm"):
             path = '.'
@@ -168,12 +170,15 @@ class METISPartition:
             
             newm['bcon_{}_p0'.format(bc)] = np.hstack(lhs)
 
-        # Build vmap (vertex, [vtx])
-        #TODO: may be expensive
-        vmap = defaultdict(list)
+        # Collect vertex id and vtx
+        vn_chunks = []
+        vtx_chunks = []
+
         for rank in range(npart):
+            # Get partitioned vertex
             vtx = msh['vtx_p{}'.format(rank)]
 
+            # Get vertex id
             vn = np.empty(len(vtx), dtype=int)
             for etype in etypes:
                 name = 'elm_{}_p{}'.format(etype, rank)
@@ -185,13 +190,27 @@ class METISPartition:
 
             globalize_con(vtx, rank, unions, etypes)
 
-            for k, v in zip(vn, vtx):
-                vmap[int(k)].append(v)
+            vn_chunks.append(vn)
+            vtx_chunks.append(vtx)
+            
+        vn_all = np.concatenate(vn_chunks)
+        vtx_all = np.concatenate(vtx_chunks)
 
-        # Obtain vtx and ivtx from vmap
-        newm['vtx_p0'] = np.hstack([vmap[i] for i in sorted(vmap.keys())])
-        nvtx = np.array([len(vmap[i]) for i in sorted(vmap.keys())])
-        newm['ivtx_p0'] = np.concatenate([[0], np.cumsum(nvtx)])
+        # Sort all records by vertex id so equal-vertex records are contiguous
+        order = np.argsort(vn_all, kind="mergesort")
+        vn_s = vn_all[order]
+        vtx_s = vtx_all[order]
+
+        # Build compacted CSR over existing vertices
+        # uniq_v: sorted vertex ids, cnt: number of records per vertex
+        uniq_v, cnt = np.unique(vn_s, return_counts=True)
+
+        ivtx_p0 = np.empty(uniq_v.size + 1, dtype=np.int64)
+        ivtx_p0[0] = 0
+        np.cumsum(cnt, out=ivtx_p0[1:])
+
+        newm['vtx_p0'] = vtx_s
+        newm['ivtx_p0'] = ivtx_p0
 
         # Copy nodes
         self.copy_nodes(msh, newm)
@@ -398,19 +417,27 @@ class METISPartition:
         lhs, lpart = self._localized_con(lhs, mapper)
         rhs, rpart = self._localized_con(rhs, mapper)
 
-        # Pre-computed left and right masks for each ranks
-        lranks, rranks = np.unique(lpart), np.unique(rpart)
-        lmasks = {l: lpart == l for l in lranks}
-        rmasks = {r: rpart == r for r in rranks}
+        # Sort partition info
+        nparts = self.npart
+        key = lpart * nparts + rpart
 
-        # Partition connectivity
-        mask = np.empty_like(lpart, dtype=bool)
-        for l, r in product(lranks, rranks):
-            np.logical_and(lmasks[l], rmasks[r], out=mask)
+        order = np.argsort(key, kind="mergesort")
+        key_s = key[order]
 
-            if not np.any(mask):
-                pass
-            elif l == r:
+        # Grouping index
+        cuts = np.flatnonzero(np.diff(key_s)) + 1
+        starts = np.r_[0, cuts]
+        ends   = np.r_[cuts, key_s.size]
+
+        # Iterate groups: faces for each (l,r) live in order[starts[j]:ends[j]]
+        for s, e in zip(starts, ends):
+            # indices of faces in this (l,r) group
+            mask = order[s:e]          
+            k = key_s[s]
+            l = int(k // nparts)
+            r = int(k %  nparts)
+
+            if l == r:
                 # Internal connectivity
                 newm['con_p{}'.format(l)] = [lhs[mask], rhs[mask]]
             else:
@@ -443,22 +470,37 @@ class METISPartition:
 
         # Localized the vtx data
         vtx, vpart = self._localized_con(vtx, mapper)
-        
-        for p in np.unique(vpart):
-            # Distinguish the vtx belong the rank
-            mask = vpart == p
-            newm['vtx_p{}'.format(p)] = vtx[mask]
 
-            # Cumulation of number of vtx for each vertex
-            cs0 = np.empty(mask.size + 1, dtype=np.int64)
-            cs0[0] = 0
-            np.cumsum(mask, out=cs0[1:])
+        # Make global vertex id
+        nvtx = ivtx.size - 1
+        deg = np.diff(ivtx)
+        vtx_id = np.repeat(np.arange(nvtx), deg)
 
-            # Distinguish the vertex belong the rank
-            has_any = (cs0[ivtx[1:]] - cs0[ivtx[:-1]]) > 0
+        # Group per part
+        order = np.argsort(vpart, kind='mergesort')
+        vpart_sorted = vpart[order]
 
-            # Save indices of link-list vtx and ivtx
-            newm['ivtx_p{}'.format(p)] = cs0[ivtx[1:]][has_any]
+        cuts = np.flatnonzero(np.diff(vpart_sorted)) + 1
+        starts = np.r_[0, cuts]
+        ends = np.r_[cuts, vpart_sorted.size]
+
+        for s, e in zip(starts, ends):
+             # indices of incidence entries belonging to partition p
+            p = int(vpart_sorted[s])
+            idx_p = order[s:e]
+
+            # Partitioned vtx
+            newm['vtx_p{}'.format(p)] = vtx[idx_p]
+
+            # Count how many entries of partition p touch each global vertex
+            cnt = np.bincount(vtx_id[idx_p], minlength=nvtx)
+            has_any = cnt > 0
+
+            # global vertices present in p
+            gvtx = np.flatnonzero(has_any)
+
+            # Local CSR pointer over compacted vertex list
+            newm['ivtx_p{}'.format(p)] = np.cumsum(cnt[gvtx])
 
         # Collect local vertex address to communicate
         n_ivtx_p = np.zeros(vpart.max() + 1, dtype=int)
@@ -495,7 +537,7 @@ class METISPartition:
         # Copy nodes
         newm['nodes'] = msh['nodes']
 
-        # Copy bnode
+        # Copy btri
         for k in msh:
-            if k.startswith('bnode'):
+            if k.startswith('btri'):
                 newm[k] = msh[k]

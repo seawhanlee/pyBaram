@@ -18,14 +18,13 @@ sys.path.insert(0, os.path.abspath('../../'))
 # -- Project information -----------------------------------------------------
 
 project = 'pyBaram'
-copyright = '2022-2024, AADL, Inha University'
+copyright = '2022-2026, AADL, Inha University'
 author = 'Jin Seok Park'
 
 # The full version, including alpha/beta/rc tags
 import pybaram._version as _version
 version = _version.__version__
 release = version
-
 
 # -- General configuration ---------------------------------------------------
 
@@ -90,7 +89,7 @@ latex_elements = {
 #'pointsize': '10pt',
 
 # Additional stuff for the LaTeX preamble.
-'preamble': '\setcounter{secnumdepth}{4}',
+'preamble': r'\setcounter{secnumdepth}{4}',
 }
 
 # Grouping the document tree into LaTeX files. List of tuples

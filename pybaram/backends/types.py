@@ -1,6 +1,22 @@
 # -*- coding: utf-8 -*-
 from mpi4py import MPI
-import numpy as np
+
+
+def _extract(arg):
+    """
+    Parse argument for array bank
+    """
+    try:
+        return arg.value
+    except AttributeError:
+        pass
+
+    if isinstance(arg, tuple) and hasattr(arg[0], 'value'):
+        # Parse tuple of array bank
+        return tuple(e.value for e in arg)
+
+    return arg
+    
 
 class ArrayBank:
     """
@@ -49,7 +65,7 @@ class Kernel:
         args = self._sum_args(self._args, args)
 
         # Parse args for Array bank object
-        args = [arg.value if hasattr(arg, 'value') else arg for arg in args]
+        args = [_extract(arg) for arg in args]
 
         # Run function
         return self._fun(*args)

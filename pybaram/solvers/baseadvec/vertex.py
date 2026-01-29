@@ -25,7 +25,7 @@ class BaseAdvecVertex(BaseVertex):
 
         if order > 1 and limiter != 'none':
             # Kernel to compute exterems at vertex
-            upts_in = tuple(ele.upts_in.value for ele in elemap.values())
+            upts_in = tuple(ele.upts_in for ele in elemap.values())
             self.compute_extv = Kernel(self._make_extv(), self.vpts, upts_in)
 
             if self._neivtx:

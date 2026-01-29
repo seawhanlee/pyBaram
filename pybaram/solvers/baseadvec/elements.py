@@ -39,7 +39,7 @@ class BaseAdvecElements(BaseElements):
         self.compute_fpts = Kernel(self._make_compute_fpts(), upts_in, fpts)
 
         # Kernel to compute divergence of solution
-        self.div_upts = Kernel(self._make_div_upts(), upts_out, fpts)
+        self.div_upts = Kernel(self._make_div_upts(), upts_out, fpts, upts_in)
 
         # Kernel to compute residuals
         self.compute_resid = Kernel(self._make_compute_resid(), self.upts_out)
@@ -108,6 +108,10 @@ class BaseAdvecElements(BaseElements):
         subs.update(self._const)
         subs.update({'sin': 'np.sin', 'cos': 'np.cos',
                      'exp': 'np.exp', 'tanh': 'np.tanh'})
+        
+        # Conservative variables
+        subs.update({v.lower() : 'upts[{0}, idx]'.format(i)
+                     for i, v in enumerate(self.conservars)})
 
         # Parase source term
         src = [self.cfg.getexpr('solver-source-terms', k, subs, default=0.0)
@@ -119,7 +123,7 @@ class BaseAdvecElements(BaseElements):
 
         # Construct function text
         f_txt = (
-            f"def _div_upts(i_begin, i_end, rhs, fpts, t=0):\n"
+            f"def _div_upts(i_begin, i_end, rhs, fpts, upts, t=0):\n"
             f"    for idx in range(i_begin, i_end): \n"
             f"        rcp_voli = rcp_vol[idx]\n"
         )
