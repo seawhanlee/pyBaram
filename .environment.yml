@@ -10,7 +10,7 @@ dependencies:
   - numba
   - h5py
   - mpi4py
-  - sphinx
+  - sphinx<9.0
   - numpydoc
   - sphinx_rtd_theme
   - sphinxcontrib-bibtex 
