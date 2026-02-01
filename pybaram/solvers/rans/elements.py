@@ -166,7 +166,7 @@ class RANSElements(BaseAdvecDiffElements):
 
         # Threshold (User tunable): 10% of boundary diagonal
         dxc = np.max(xwc, axis=0) - np.min(xwc, axis=0)
-        threshold = np.sqrt(np.sum(dxc**2))*0.005
+        threshold = np.sqrt(np.sum(dxc**2))*0.01
         
         # Mask if dist < threshhold
         mask = fast_distance < threshold
@@ -195,7 +195,7 @@ class RANSElements(BaseAdvecDiffElements):
 
         # Threshold (User tunable): 10% of boundary diagonal
         dxc = np.max(xwc, axis=0) - np.min(xwc, axis=0)
-        threshold = np.sqrt(np.sum(dxc**2))*0.005
+        threshold = np.sqrt(np.sum(dxc**2))*0.01
         
         # Mask if dist < threshhold
         mask = fast_distance < threshold
