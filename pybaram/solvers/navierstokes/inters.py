@@ -469,7 +469,7 @@ class NavierStokesBCInters(BaseAdvecDiffBCInters):
 
         return self.be.make_loop(self.nfpts, comm_spr)
 
-    def _make_aprx_jac(self, nele):
+    def _make_aprx_jac(self):
         from pybaram.solvers.euler.jacobian import make_convective_jacobian
         from pybaram.solvers.navierstokes.jacobian import get_viscous_jacobian
 
