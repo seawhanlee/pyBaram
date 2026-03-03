@@ -156,17 +156,17 @@ class NavierStokesElements(BaseAdvecDiffElements, ViscousFluidElements):
                 p = max((gamma - 1)*(et - 0.5*rv2), pmin)
                 c = np.sqrt(gamma*p/rho)
 
-                # Sum of Wave speed * surface area
-                sum_lamdf = 0.0
+                # Sum of inviscid and viscous spectral radii on faces
+                lamc, lamv = 0.0, 0.0
                 for jdx in range(nface):
-                    # Wave speed abs(Vn) + c + max(4/3 \gamma) mu/rho/pr/length
-                    lamdf = abs(dot(u[:, idx], svec[jdx, idx], ndims, 1))/rho + c
-                    lamdf += (1/rho*max(4/3, gamma)*mu[idx]/pr *
-                              smag[jdx, idx]/vol[idx])
-                    sum_lamdf += lamdf*smag[jdx, idx]
+                    # Inviscid spectral radius: Wave speed abs(Vn) + c
+                    lamc += (abs(dot(u[:, idx], svec[jdx, idx], ndims, 1))/rho + c)*smag[jdx, idx]
 
-                # Time step : CFL * vol / sum(lambda_f S_f)
-                dt[idx] = cfl*vol[idx] / sum_lamdf
+                    # Viscous spectral radisu: max(4/3 \gamma)/rho/(mu/pr+mut/prt)/length
+                    lamv += (1/rho*max(4/3, gamma)*mu[idx]/pr*smag[jdx, idx]**2/vol[idx])
+
+                # Time step : CFL * vol / max(lam_c, C*lam_v), C=4
+                dt[idx] = cfl*vol[idx] / max(lamc, 4*lamv)
 
         return self.be.make_loop(self.neles, timestep)
 

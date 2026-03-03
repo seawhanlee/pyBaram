@@ -161,15 +161,14 @@ class RANSElements(BaseAdvecDiffElements):
             workers = -1
 
         # Fast distance
-        fast_distance, _ = tree.query(self.xc, workers=workers)
+        fast_distance, fast_idx = tree.query(self.xc, workers=workers)
         wdist[:] = fast_distance
 
-        # Threshold (User tunable): 10% of boundary diagonal
-        dxc = np.max(xwc, axis=0) - np.min(xwc, axis=0)
-        threshold = np.sqrt(np.sum(dxc**2))*0.01
+        # Threshold : two times of max distance btw vertex to center of triangle
+        threshold = 2*np.max(np.linalg.norm(xw - xwc[:, None], axis=2), axis=1)
         
-        # Mask if dist < threshhold
-        mask = fast_distance < threshold
+        # Mask if dist < threshold of nearest triangle
+        mask = fast_distance < threshold[fast_idx]
         
         # Detail check (User tunable)
         n_neighbor = max(len(xwc) // 1000, 50)
@@ -190,15 +189,14 @@ class RANSElements(BaseAdvecDiffElements):
         tree = KDTree(xwc)
 
         # Fast distance
-        fast_distance, _ = tree.query(self.xc)
+        fast_distance, fast_idx = tree.query(self.xc)
         wdist[:] = fast_distance
 
-        # Threshold (User tunable): 10% of boundary diagonal
-        dxc = np.max(xwc, axis=0) - np.min(xwc, axis=0)
-        threshold = np.sqrt(np.sum(dxc**2))*0.01
+        # Threshold : two times of max distance btw vertex and center of triangle
+        threshold = 2*np.max(np.linalg.norm(xw - xwc[:, None], axis=2), axis=1)
         
-        # Mask if dist < threshhold
-        mask = fast_distance < threshold
+        # Mask if dist < threshold of nearest triangle
+        mask = fast_distance < threshold[fast_idx]
         
         # Detail check (User tunable)
         n_neighbor = max(len(xwc) // 1000, 50)
@@ -250,17 +248,18 @@ class RANSElements(BaseAdvecDiffElements):
                 p = max((gamma - 1)*(et - 0.5*rv2), pmin)
                 c = np.sqrt(gamma*p/rho)
 
-                # Sum of Wave speed * surface area
-                sum_lamdf = 0.0
+                # Sum of inviscid and viscous spectral radii on faces
+                lamc, lamv = 0.0, 0.0
                 for jdx in range(nface):
-                    # Wave speed abs(Vn) + c + max(4/3 \gamma)/rho/(mu/pr+mut/prt)/length
-                    lamdf = abs(dot(u[:, idx], svec[jdx, idx], ndims, 1))/rho + c
-                    lamdf += (1/rho*max(4/3, gamma)*(mu[idx]/pr + mut[idx]/prt)*
-                              smag[jdx, idx]/vol[idx])
-                    sum_lamdf += lamdf*smag[jdx, idx]
+                    # Inviscid spectral radius: Wave speed abs(Vn) + c
+                    lamc += (abs(dot(u[:, idx], svec[jdx, idx], ndims, 1))/rho + c)*smag[jdx, idx]
 
-                # Time step : CFL * vol / sum(lambda_f S_f)
-                dt[idx] = cfl*vol[idx] / sum_lamdf
+                    # Viscous spectral radisu: max(4/3 \gamma)/rho/(mu/pr+mut/prt)/length
+                    lamv += (1/rho*max(4/3, gamma)*(mu[idx]/pr + mut[idx]/prt)*
+                              smag[jdx, idx]**2/vol[idx])
+
+                # Time step : CFL * vol / max(lam_c, C*lam_v), C=4
+                dt[idx] = cfl*vol[idx] / max(lamc, 4*lamv)
 
         return self.be.make_loop(self.neles, timestep)
 

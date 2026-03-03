@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from mpi4py import MPI
-import time
+from time import perf_counter
 
 from pybaram.plugins.base import BasePlugin, csv_write
 
@@ -30,7 +30,7 @@ class StatsPlugin(BasePlugin):
                 header += [*conservars, 'time']
                 if intg.impl_op == 'approx-jacobian':
                     header += ['subiter', 'subres']
-                self.t0 = time.time()
+                self.t0 = perf_counter()
             else:
                 header += ['t', 'dt']
 
@@ -43,12 +43,12 @@ class StatsPlugin(BasePlugin):
 
             if intg.mode == 'steady':
                 # Compute time interval as millisecond unit
-                interval = (time.time() - self.t0) * 1000.0
+                interval = (perf_counter() - self.t0) * 1000.0
                 resid = intg.resid / intg.resid0
                 stats += [*resid.tolist(), interval]
                 if intg.impl_op == 'approx-jacobian':
                     stats += [intg.subitnum, intg.subres]
-                self.t0 = time.time()
+                self.t0 = perf_counter()
             else:
                 stats += [intg.tcurr, intg.dt]
 
