@@ -161,15 +161,14 @@ class RANSElements(BaseAdvecDiffElements):
             workers = -1
 
         # Fast distance
-        fast_distance, _ = tree.query(self.xc, workers=workers)
+        fast_distance, fast_idx = tree.query(self.xc, workers=workers)
         wdist[:] = fast_distance
 
-        # Threshold (User tunable): 10% of boundary diagonal
-        dxc = np.max(xwc, axis=0) - np.min(xwc, axis=0)
-        threshold = np.sqrt(np.sum(dxc**2))*0.01
+        # Threshold : two times of max distance btw vertex to center of triangle
+        threshold = 2*np.max(np.linalg.norm(xw - xwc[:, None], axis=2), axis=1)
         
-        # Mask if dist < threshhold
-        mask = fast_distance < threshold
+        # Mask if dist < threshold of nearest triangle
+        mask = fast_distance < threshold[fast_idx]
         
         # Detail check (User tunable)
         n_neighbor = max(len(xwc) // 1000, 50)
@@ -190,15 +189,14 @@ class RANSElements(BaseAdvecDiffElements):
         tree = KDTree(xwc)
 
         # Fast distance
-        fast_distance, _ = tree.query(self.xc)
+        fast_distance, fast_idx = tree.query(self.xc)
         wdist[:] = fast_distance
 
-        # Threshold (User tunable): 10% of boundary diagonal
-        dxc = np.max(xwc, axis=0) - np.min(xwc, axis=0)
-        threshold = np.sqrt(np.sum(dxc**2))*0.01
+        # Threshold : two times of max distance btw vertex and center of triangle
+        threshold = 2*np.max(np.linalg.norm(xw - xwc[:, None], axis=2), axis=1)
         
-        # Mask if dist < threshhold
-        mask = fast_distance < threshold
+        # Mask if dist < threshold of nearest triangle
+        mask = fast_distance < threshold[fast_idx]
         
         # Detail check (User tunable)
         n_neighbor = max(len(xwc) // 1000, 50)
