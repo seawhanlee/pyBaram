@@ -221,7 +221,7 @@ class BaseElements:
             beta, w = 1.0, 1.0
         elif self._grad_method == 'weighted-least-square':
             # Invserse distance weight
-            beta, w = 1.0, 1/distance
+            beta, w = 1.0, 1/distance**2
         elif self._grad_method == 'green-gauss':
             beta, w = 0.0, 1.0
         elif self._grad_method == 'hybrid':
@@ -243,7 +243,7 @@ class BaseElements:
             raise ValueError("Invalid gradient method : ", self._grad_method)
 
         # Scaled dxc vector
-        dxcs = dxc*w
+        dxcs = dxc*np.sqrt(w)
 
         # Least square matrix [dx*dy] and its inverse
         lsq = np.array([[np.einsum('ij,ij->j', x, y)
@@ -251,7 +251,7 @@ class BaseElements:
 
         # Hybrid type of Ax=b
         A = beta*lsq + 2*(1-beta)*vol*np.eye(self.ndims)[:,:,None]
-        b = beta*dxcs*w + 2*(1-beta)*0.5*snorm_vec*snorm_mag
+        b = beta*dxc*w + 2*(1-beta)*0.5*snorm_vec*snorm_mag
 
         # Solve Ax=b
         op = np.linalg.solve(np.rollaxis(A, axis=2), np.rollaxis(b, axis=2)).transpose(1,2,0)
