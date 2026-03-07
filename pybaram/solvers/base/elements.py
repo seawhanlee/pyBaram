@@ -219,11 +219,14 @@ class BaseElements:
 
         if self._grad_method == 'least-square':
             beta, w = 1.0, 1.0
+            is_wlsq = False
         elif self._grad_method == 'weighted-least-square':
             # Invserse distance weight
             beta, w = 1.0, 1/distance**2
+            is_wlsq = True
         elif self._grad_method == 'green-gauss':
             beta, w = 0.0, 1.0
+            is_wlsq = False
         elif self._grad_method == 'hybrid':
             # Shima et al., Green–Gauss/Weighted-Least-Squares
             # Hybrid Gradient Reconstruction for
@@ -239,15 +242,18 @@ class BaseElements:
             # Compute blending function (GLSQ)
             ar = 2*np.linalg.norm(self.dxf, axis=1).max(axis=0)*snorm_mag.max(axis=0)/vol
             beta = np.minimum(1, 2/ar)
+            is_wlsq = True
         else:
             raise ValueError("Invalid gradient method : ", self._grad_method)
 
-        # Scaled dxc vector
-        dxcs = dxc*np.sqrt(w)
-
-        # Least square matrix [dx*dy] and its inverse
-        lsq = np.array([[np.einsum('ij,ij->j', x, y)
-                         for y in dxcs] for x in dxcs])
+        if is_wlsq:
+            # Weighted Least square matrix [dx*dy] and its inverse
+            lsq = np.array([[np.einsum('ij,ij,ij->j', w, x, y)
+                            for y in dxc] for x in dxc])
+        else:
+            # Least square matrix [dx*dy] and its inverse
+            lsq = np.array([[np.einsum('ij,ij->j', x, y)
+                            for y in dxc] for x in dxc])
 
         # Hybrid type of Ax=b
         A = beta*lsq + 2*(1-beta)*vol*np.eye(self.ndims)[:,:,None]
