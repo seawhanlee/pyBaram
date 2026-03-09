@@ -361,7 +361,6 @@ class LUSGS(BaseSteadyIntegrator):
     
     def step(self):
         resid = self.rhs(0, 1, is_norm=True)
-        self.sys.spec_rad()
         self.sys.eles.lusgs()
         self.sys.eles.update()
 
@@ -465,7 +464,6 @@ class ColoredLUSGS(BaseSteadyIntegrator):
     
     def step(self):
         resid = self.rhs(0, 1, is_norm=True)
-        self.sys.spec_rad()
         self.sys.eles.lusgs()
         self.sys.eles.update()
 
@@ -546,7 +544,6 @@ class BlockJacobi(BaseSteadyIntegrator):
 
     def step(self):
         resid = self.rhs(0, 1, is_norm=True)
-        self.sys.approx_jac()
         self.sys.eles.pre_jacobi()
         subresid = 0.0
 
@@ -658,7 +655,6 @@ class BlockLUSGS(BaseSteadyIntegrator):
     
     def step(self):
         resid = self.rhs(0, 1, is_norm=True)
-        self.sys.approx_jac()
 
         # Compute diagonal matrix
         self.sys.eles.pre_blusgs()
@@ -793,7 +789,6 @@ class ColoredBlockLUSGS(BaseSteadyIntegrator):
     
     def step(self):
         resid = self.rhs(0, 1, is_norm=True)
-        self.sys.approx_jac()
 
         # Compute diagonal matrix
         self.sys.eles.pre_blusgs()

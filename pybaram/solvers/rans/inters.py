@@ -21,22 +21,23 @@ class RANSIntInters(BaseAdvecDiffIntInters):
         # Save viscosity on face (for implicit operator)
         muf = np.empty((2,self.nfpts))
 
-        # Kernel to compute flux
+        # Collect face point array
         fpts, gradf = self._fpts, self._gradf
-        self.compute_flux = Kernel(self._make_flux(), muf, gradf, fpts)
 
         if impl_op == 'spectral-radius':
-            # Kernel to compute Spectral radius
+            # Collect array to save spectral raidus
             fspr = tuple(cell.fspr for cell in elemap.values())
             tfspr = tuple(cell.tfspr for cell in elemap.values())
-            self.compute_spec_rad = Kernel(self._make_spec_rad(), muf, fpts, fspr, tfspr)
+            self.compute_flux = Kernel(self._make_flux(impl_op), muf, gradf, fpts, fspr, tfspr)
         elif impl_op == 'approx-jacobian':
-            # Kernel to compute Jacobian matrices
+            # Collect array to save Jacobian
             fjmat = tuple(cell.jmat for cell in elemap.values())
             tfjmat = tuple(cell.tjmat for cell in elemap.values())
-            self.compute_aprx_jac = Kernel(self._make_aprx_jac(), muf, gradf, fpts, fjmat, tfjmat)
+            self.compute_flux = Kernel(self._make_flux(impl_op), muf, gradf, fpts, fjmat, tfjmat)
+        else:
+            self.compute_flux = Kernel(self._make_flux(impl_op), muf, gradf, fpts)
 
-    def _make_flux(self):
+    def _make_flux(self, impl_op):
         ndims, nvars, nfvars = self.ndims, self.nvars, self.nfvars
 
         lt, le, lf = self._lidx
@@ -67,188 +68,195 @@ class RANSIntInters(BaseAdvecDiffIntInters):
         # Get turbulence flux from `turbulent.py`
         tflux = self._make_turb_flux()
 
-        def comm_flux(i_begin, i_end, muf, gradf, uf):
-            for idx in range(i_begin, i_end):
-                fn = array((nvars,))
-                um = array((nvars,))
+        if impl_op == 'spectral-radius':
+            # reciprocal of distance between two cells
+            rcp_dx = self._rcp_dx
 
-                # Normal vector and wall distance (ydns)
-                nfi = nf[:, idx]
-                ydnsi = ydist[idx]
+            # Get wave speed function
+            wave_speed = self.ele0.make_wave_speed()
+            twave_speed = self.ele0.make_turb_wave_speed()
 
-                # Left and right solutions
-                lti, lfi, lei = lt[idx], lf[idx], le[idx]
-                rti, rfi, rei = rt[idx], rf[idx], re[idx]
-                ul = uf[lti][lfi, :, lei]
-                ur = uf[rti][rfi, :, rei]
+            def comm_flux_spr(i_begin, i_end, muf, gradf, uf, lam, tlam):
+                for idx in range(i_begin, i_end):
+                    fn = array((nvars,))
+                    um = array((nvars,))
 
-                # Gradient and solution at face
-                gf = gradf[:, :, idx]
+                    # Normal vector and wall distance (ydns)
+                    nfi = nf[:, idx]
+                    ydnsi = ydist[idx]
+                    rcp_dxi = rcp_dx[idx]
 
-                for jdx in range(nvars):
-                    um[jdx] = 0.5*(ul[jdx] + ur[jdx])
+                    # Left and right solutions
+                    lti, lfi, lei = lt[idx], lf[idx], le[idx]
+                    rti, rfi, rei = rt[idx], rf[idx], re[idx]
+                    ul = uf[lti][lfi, :, lei]
+                    ur = uf[rti][rfi, :, rei]
 
-                # Compute approixmate Riemann solver
-                flux(ul, ur, nfi, fn)
-                
-                # Compute viscosity and viscous flux
-                muf[0, idx] = mu = compute_mu(um)
-                muf[1, idx] = mut = compute_mut(um, gf, mu, ydnsi)
-                visflux(um, gf, nfi, mu, mut, fn)
+                    # Gradient and solution at face
+                    gf = gradf[:, :, idx]
 
-                # Compute turbulent flux
-                tflux(ul, ur, um, gf, nfi, ydnsi, mu, mut, fn)
+                    for jdx in range(nvars):
+                        um[jdx] = 0.5*(ul[jdx] + ur[jdx])
 
-                for jdx in range(nvars):
-                    # Save it at left and right solution array
-                    uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
-                    uf[rti][rfi, jdx, rei] = -fn[jdx]*sf[idx]
+                    # Compute approixmate Riemann solver
+                    flux(ul, ur, nfi, fn)
+                    
+                    # Compute viscosity and viscous flux
+                    muf[0, idx] = mu = compute_mu(um)
+                    muf[1, idx] = mut = compute_mut(um, gf, mu, ydnsi)
+                    visflux(um, gf, nfi, mu, mut, fn)
 
-        return self.be.make_loop(self.nfpts, comm_flux)
+                    # Compute turbulent flux
+                    tflux(ul, ur, um, gf, nfi, ydnsi, mu, mut, fn)
 
-    def _make_spec_rad(self):
-        nvars = self.nvars
-        lt, le, lf = self._lidx
-        rt, re, rf = self._ridx
-        nf = self._vec_snorm
-        
-        # reciprocal of distance between two cells
-        rcp_dx = self._rcp_dx
+                    # Compute wave speed on both cell
+                    laml = wave_speed(ul, nfi, rcp_dxi, mu, mut)
+                    lamr = wave_speed(ur, nfi, rcp_dxi, mu, mut)
 
-        # Get wave speed function
-        array = self.be.local()
-        wave_speed = self.ele0.make_wave_speed()
-        twave_speed = self.ele0.make_turb_wave_speed()
+                    # Compute spectral radius on face
+                    lami = max(laml, lamr)
+                    lam[lti][lfi, lei] = lami
+                    lam[rti][rfi, rei] = lami
 
-        def comm_spr(i_begin, i_end, muf, uf, lam, tlam):
-            for idx in range(i_begin, i_end):
-                um = array((nvars,))
+                    # Compute turbulent spectral radius
+                    tlami = twave_speed(um, nfi, rcp_dxi, mu, mut)
+                    tlam[lti][lfi, lei] = tlami
+                    tlam[rti][rfi, rei] = tlami
 
-                # Normal vector
-                nfi = nf[:, idx]
-                rcp_dxi = rcp_dx[idx]
+                    for jdx in range(nvars):
+                        # Save it at left and right solution array
+                        uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
+                        uf[rti][rfi, jdx, rei] = -fn[jdx]*sf[idx]
 
-                # Left and right solutions
-                lti, lfi, lei = lt[idx], lf[idx], le[idx]
-                rti, rfi, rei = rt[idx], rf[idx], re[idx]
-                ul = uf[lti][lfi, :, lei]
-                ur = uf[rti][rfi, :, rei]
+            return self.be.make_loop(self.nfpts, comm_flux_spr)
+        elif impl_op == 'approx-jacobian':
+            from pybaram.solvers.euler.jacobian import make_convective_jacobian
+            from pybaram.solvers.navierstokes.jacobian import get_viscous_jacobian
 
-                # Get viscosity on face (saved at rhside)
-                mu = muf[0, idx]
-                mut = muf[1, idx]
+            ntvars = nvars - nfvars
 
-                # Compute wave speed on both cell
-                laml = wave_speed(ul, nfi, rcp_dxi, mu, mut)
-                lamr = wave_speed(ur, nfi, rcp_dxi, mu, mut)
+            vistype = self.cfg.get('solver-time-integrator', 'visflux-jacobian', 'tlns')
 
-                # Compute spectral radius on face
-                lami = max(laml, lamr)
-                lam[lti][lfi, lei] = lami
-                lam[rti][rfi, rei] = lami
+            # Get Jacobian functions
+            pos_jacobian = make_convective_jacobian(self.be, cplargs, 'positive')
+            neg_jacobian = make_convective_jacobian(self.be, cplargs, 'negative')
+            vis_pos_jacobian = get_viscous_jacobian(vistype, self.be, cplargs, 'positive')
+            vis_neg_jacobian = get_viscous_jacobian(vistype, self.be, cplargs, 'negative')
+            turb_pos_jacobian = self.ele0.make_turb_jacobian('positive')
+            turb_neg_jacobian = self.ele0.make_turb_jacobian('negative')
 
-                for jdx in range(nvars):
-                    um[jdx] = 0.5*(ul[jdx] + ur[jdx])
+            # reciprocal of distance between two cells
+            rcp_dx = self._rcp_dx
 
-                # Compute turbulent spectral radius
-                tlami = twave_speed(um, nfi, rcp_dxi, mu, mut)
-                tlam[lti][lfi, lei] = tlami
-                tlam[rti][rfi, rei] = tlami
+            def comm_flux_ajac(i_begin, i_end, muf, gradf, uf, jmats, tjmats):
+                for idx in range(i_begin, i_end):
+                    fn = array((nvars,))
+                    um = array((nvars,))
 
-        return self.be.make_loop(self.nfpts, comm_spr)
-    
-    def _make_aprx_jac(self):
-        from pybaram.solvers.euler.jacobian import make_convective_jacobian
-        from pybaram.solvers.navierstokes.jacobian import get_viscous_jacobian
+                    ap = array((nfvars, nfvars))
+                    am = array((nfvars, nfvars))
+                    tap = array((ntvars, ntvars))
+                    tam = array((ntvars, ntvars))
 
-        nvars, nfvars = self.nvars, self.nfvars
-        ntvars = nvars - nfvars
 
-        # Left and right indices
-        lt, le, lf = self._lidx
-        rt, re, rf = self._ridx
-        nf = self._vec_snorm
-        ydist = self.ydist
-        
-        # reciprocal of distance between two cells
-        rcp_dx = self._rcp_dx
+                    # Normal vector and wall distance (ydns)
+                    nfi = nf[:, idx]
+                    ydnsi = ydist[idx]
+                    rcp_dxi = rcp_dx[idx]
 
-        cplargs = {
-            'ndims': self.ndims,
-            'nfvars': self.nfvars,
-            'gamma': self.ele0._const['gamma'],
-            'pr': self.ele0._const['pr'],
-            'to_prim': self.ele0.to_flow_primevars()
-        }
+                    # Left and right solutions
+                    lti, lfi, lei = lt[idx], lf[idx], le[idx]
+                    rti, rfi, rei = rt[idx], rf[idx], re[idx]
+                    ul = uf[lti][lfi, :, lei]
+                    ur = uf[rti][rfi, :, rei]
 
-        # Get viscous Jacobian type
-        vistype = self.cfg.get('solver-time-integrator', 'visflux-jacobian', 'tlns')
+                    # Gradient and solution at face
+                    gf = gradf[:, :, idx]
 
-        # Get Jacobian functions
-        pos_jacobian = make_convective_jacobian(self.be, cplargs, 'positive')
-        neg_jacobian = make_convective_jacobian(self.be, cplargs, 'negative')
-        vis_pos_jacobian = get_viscous_jacobian(vistype, self.be, cplargs, 'positive')
-        vis_neg_jacobian = get_viscous_jacobian(vistype, self.be, cplargs, 'negative')
-        turb_pos_jacobian = self.ele0.make_turb_jacobian('positive')
-        turb_neg_jacobian = self.ele0.make_turb_jacobian('negative')
+                    for jdx in range(nvars):
+                        um[jdx] = 0.5*(ul[jdx] + ur[jdx])
 
-        # Temporal array & matrix
-        array = self.be.local()
+                    # Compute approixmate Riemann solver
+                    flux(ul, ur, nfi, fn)
+                    
+                    # Compute viscosity and viscous flux
+                    muf[0, idx] = mu = compute_mu(um)
+                    muf[1, idx] = mut = compute_mut(um, gf, mu, ydnsi)
+                    visflux(um, gf, nfi, mu, mut, fn)
 
-        def comm_apj(i_begin, i_end, muf, gradf, uf, jmats, tjmats):
-            for idx in range(i_begin, i_end):
-                um = array((nvars,))
-                ap = array((nfvars, nfvars))
-                am = array((nfvars, nfvars))
-                tap = array((ntvars, ntvars))
-                tam = array((ntvars, ntvars))
+                    # Compute turbulent flux
+                    tflux(ul, ur, um, gf, nfi, ydnsi, mu, mut, fn)
 
-                # Normal vector
-                nfi = nf[:, idx]
-                rcp_dxi = rcp_dx[idx]
+                    # Compute Jacobian matrix on surface
+                    # based on left/right cell
+                    pos_jacobian(ul, nfi, ap)
+                    neg_jacobian(ur, nfi, am)
 
-                # Left and right solutions
-                lti, lfi, lei = lt[idx], lf[idx], le[idx]
-                rti, rfi, rei = rt[idx], rf[idx], re[idx]
-                ul = uf[lti][lfi, :, lei]
-                ur = uf[rti][rfi, :, rei]
+                    vis_pos_jacobian(ul, nfi, ap, mu, rcp_dxi)
+                    vis_neg_jacobian(ur, nfi, am, mu, rcp_dxi)
 
-                # Get viscosity on face (saved at rhside)
-                mu = muf[0, idx]
-                mut = muf[1, idx]
+                    for row in range(nfvars):
+                        for col in range(nfvars):
+                            jmats[lti][0, row, col, lfi, lei] = ap[row][col]
+                            jmats[lti][1, row, col, lfi, lei] = am[row][col]
+                            jmats[rti][0, row, col, rfi, rei] = -am[row][col]
+                            jmats[rti][1, row, col, rfi, rei] = -ap[row][col]
 
-                # Compute Jacobian matrix on surface
-                # based on left/right cell
-                pos_jacobian(ul, nfi, ap)
-                neg_jacobian(ur, nfi, am)
+                    turb_pos_jacobian(um, nfi, tap, rcp_dxi, mu, mut, gf, ydnsi)
+                    turb_neg_jacobian(um, nfi, tam, rcp_dxi, mu, mut, gf, ydnsi)
 
-                vis_pos_jacobian(ul, nfi, ap, mu, rcp_dxi)
-                vis_neg_jacobian(ur, nfi, am, mu, rcp_dxi)
+                    for row in range(ntvars):
+                        for col in range(ntvars):
+                            tjmats[lti][0, row, col, lfi, lei] = tap[row][col]
+                            tjmats[lti][1, row, col, lfi, lei] = tam[row][col]
+                            tjmats[rti][0, row, col, rfi, rei] = -tam[row][col]
+                            tjmats[rti][1, row, col, rfi, rei] = -tap[row][col]
 
-                for row in range(nfvars):
-                    for col in range(nfvars):
-                        jmats[lti][0, row, col, lfi, lei] = ap[row][col]
-                        jmats[lti][1, row, col, lfi, lei] = am[row][col]
-                        jmats[rti][0, row, col, rfi, rei] = -am[row][col]
-                        jmats[rti][1, row, col, rfi, rei] = -ap[row][col]
-                
-                # Turbulent Jacobian
-                gf = gradf[:, :, idx]
-                ydnsi = ydist[idx]
-                for jdx in range(nvars):
-                    um[jdx] = 0.5*(ul[jdx] + ur[jdx])
-                
-                turb_pos_jacobian(um, nfi, tap, rcp_dxi, mu, mut, gf, ydnsi)
-                turb_neg_jacobian(um, nfi, tam, rcp_dxi, mu, mut, gf, ydnsi)
+                    for jdx in range(nvars):
+                        # Save it at left and right solution array
+                        uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
+                        uf[rti][rfi, jdx, rei] = -fn[jdx]*sf[idx]
 
-                for row in range(ntvars):
-                    for col in range(ntvars):
-                        tjmats[lti][0, row, col, lfi, lei] = tap[row][col]
-                        tjmats[lti][1, row, col, lfi, lei] = tam[row][col]
-                        tjmats[rti][0, row, col, rfi, rei] = -tam[row][col]
-                        tjmats[rti][1, row, col, rfi, rei] = -tap[row][col]
+            return self.be.make_loop(self.nfpts, comm_flux_ajac)
+        else:
+            def comm_flux(i_begin, i_end, muf, gradf, uf):
+                for idx in range(i_begin, i_end):
+                    fn = array((nvars,))
+                    um = array((nvars,))
 
-        return self.be.make_loop(self.nfpts, comm_apj)
+                    # Normal vector and wall distance (ydns)
+                    nfi = nf[:, idx]
+                    ydnsi = ydist[idx]
+
+                    # Left and right solutions
+                    lti, lfi, lei = lt[idx], lf[idx], le[idx]
+                    rti, rfi, rei = rt[idx], rf[idx], re[idx]
+                    ul = uf[lti][lfi, :, lei]
+                    ur = uf[rti][rfi, :, rei]
+
+                    # Gradient and solution at face
+                    gf = gradf[:, :, idx]
+
+                    for jdx in range(nvars):
+                        um[jdx] = 0.5*(ul[jdx] + ur[jdx])
+
+                    # Compute approixmate Riemann solver
+                    flux(ul, ur, nfi, fn)
+                    
+                    # Compute viscosity and viscous flux
+                    muf[0, idx] = mu = compute_mu(um)
+                    muf[1, idx] = mut = compute_mut(um, gf, mu, ydnsi)
+                    visflux(um, gf, nfi, mu, mut, fn)
+
+                    # Compute turbulent flux
+                    tflux(ul, ur, um, gf, nfi, ydnsi, mu, mut, fn)
+
+                    for jdx in range(nvars):
+                        # Save it at left and right solution array
+                        uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
+                        uf[rti][rfi, jdx, rei] = -fn[jdx]*sf[idx]
+
+            return self.be.make_loop(self.nfpts, comm_flux)
 
 
 class RANSMPIInters(BaseAdvecDiffMPIInters):
@@ -266,20 +274,21 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
         # Kernel to compute flux
         fpts, gradf = self._fpts, self._gradf
         rhs = self._rhs
-        self.compute_flux = Kernel(self._make_flux(), muf, gradf, rhs, fpts)
 
         if impl_op == 'spectral-radius':
             # Kernel to compute Spectral radius
             fspr = tuple(cell.fspr for cell in elemap.values())
             tfspr = tuple(cell.tfspr for cell in elemap.values())
-            self.compute_spec_rad = Kernel(self._make_spec_rad(), muf, fpts, fspr, tfspr)
+            self.compute_flux = Kernel(self._make_flux(impl_op), muf, gradf, rhs, fpts, fspr, tfspr)
         elif impl_op == 'approx-jacobian':
             # Kernel to compute Jacobian matrices
             fjmat = tuple(cell.jmat for cell in elemap.values())
             tfjmat = tuple(cell.tjmat for cell in elemap.values())
-            self.compute_aprx_jac = Kernel(self._make_aprx_jac(), muf, gradf, fpts, fjmat, tfjmat)
+            self.compute_flux = Kernel(self._make_flux(impl_op), muf, gradf, rhs, fpts, fjmat, tfjmat)
+        else:
+            self.compute_flux = Kernel(self._make_flux(impl_op), muf, gradf, rhs, fpts)
 
-    def _make_flux(self):
+    def _make_flux(self, impl_op):
         ndims, nvars, nfvars = self.ndims, self.nvars, self.nfvars
 
         lt, le, lf = self._lidx
@@ -308,150 +317,170 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
 
         # Get turbulence flux from `turbulent.py`
         tflux = self._make_turb_flux()
+            
+        if impl_op == 'spectral-radius':
+            # reciprocal of distance between two cells
+            rcp_dx = self._rcp_dx
 
-        def comm_flux(i_begin, i_end, muf, gradf, rhs, uf):
-            for idx in range(i_begin, i_end):
-                fn = array((nvars,))
-                um = array((nvars,))
+            # Get wave speed function
+            wave_speed = self.ele0.make_wave_speed()
+            twave_speed = self.ele0.make_turb_wave_speed()
 
-                # Normal vector and wall distance (ydns)
-                nfi = nf[:, idx]
-                ydnsi = ydist[idx]
+            def comm_flux_spr(i_begin, i_end, muf, gradf, rhs, uf, lam, tlam):
+                for idx in range(i_begin, i_end):
+                    fn = array((nvars,))
+                    um = array((nvars,))
 
-                # Left and right solutions
-                lti, lfi, lei = lt[idx], lf[idx], le[idx]
-                ul = uf[lti][lfi, :, lei]
-                ur = rhs[:, idx]
+                    # Normal vector and wall distance (ydns)
+                    nfi = nf[:, idx]
+                    ydnsi = ydist[idx]
+                    rcp_dxi = rcp_dx[idx]
 
-                # Gradient and solution at face
-                gf = gradf[:, :, idx]
+                    # Left and right solutions
+                    lti, lfi, lei = lt[idx], lf[idx], le[idx]
+                    ul = uf[lti][lfi, :, lei]
+                    ur = rhs[:, idx]
 
-                for jdx in range(nvars):
-                    um[jdx] = 0.5*(ul[jdx] + ur[jdx])
+                    # Gradient and solution at face
+                    gf = gradf[:, :, idx]
 
-                # Compute approixmate Riemann solver
-                flux(ul, ur, nfi, fn)
-                
-                # Compute viscosity and viscous flux
-                muf[0, idx] = mu = compute_mu(um)
-                muf[1, idx] = mut = compute_mut(um, gf, mu, ydnsi)
-                visflux(um, gf, nfi, mu, mut, fn)
+                    for jdx in range(nvars):
+                        um[jdx] = 0.5*(ul[jdx] + ur[jdx])
 
-                # Compute turbulent flux
-                tflux(ul, ur, um, gf, nfi, ydnsi, mu, mut, fn)
+                    # Compute approixmate Riemann solver
+                    flux(ul, ur, nfi, fn)
+                    
+                    # Compute viscosity and viscous flux
+                    muf[0, idx] = mu = compute_mu(um)
+                    muf[1, idx] = mut = compute_mut(um, gf, mu, ydnsi)
+                    visflux(um, gf, nfi, mu, mut, fn)
 
-                for jdx in range(nvars):
-                    # Save it at left solution array
-                    uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
+                    # Compute turbulent flux
+                    tflux(ul, ur, um, gf, nfi, ydnsi, mu, mut, fn)
 
-        return self.be.make_loop(self.nfpts, comm_flux)
-    
-    def _make_spec_rad(self):
-        lt, le, lf = self._lidx
-        nf = self._vec_snorm
-        
-        # reciprocal of distance between two cells
-        rcp_dx = self._rcp_dx
+                    # Compute spectral radius on face
+                    lami = wave_speed(ul, nfi, rcp_dxi, mu, mut)
+                    lam[lti][lfi, lei] = lami
 
-        # Get wave speed function
-        wave_speed = self.ele0.make_wave_speed()
-        twave_speed = self.ele0.make_turb_wave_speed()
+                    # Compute turbulent spectral radius
+                    tlami = twave_speed(ul, nfi, rcp_dxi, mu, mut)
+                    tlam[lti][lfi, lei] = tlami
 
-        def comm_spr(i_begin, i_end, muf, uf, lam, tlam):
-            for idx in range(i_begin, i_end):
-                # Normal vector
-                nfi = nf[:, idx]
-                rcp_dxi = rcp_dx[idx]
+                    for jdx in range(nvars):
+                        # Save it at left solution array
+                        uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-                # Left and right solutions
-                lti, lfi, lei = lt[idx], lf[idx], le[idx]
-                ul = uf[lti][lfi, :, lei]
+            return self.be.make_loop(self.nfpts, comm_flux_spr)
+        elif impl_op == 'approx-jacobian':
+            from pybaram.solvers.euler.jacobian import make_convective_jacobian
+            from pybaram.solvers.navierstokes.jacobian import get_viscous_jacobian
 
-                # Get viscosity on face (saved at rhside)
-                mu = muf[0, idx]
-                mut = muf[1, idx]
+            ntvars = nvars - nfvars
 
-                # Compute spectral radius on face
-                lami = wave_speed(ul, nfi, rcp_dxi, mu, mut)
-                lam[lti][lfi, lei] = lami
+            # reciprocal of distance between two cells
+            rcp_dx = self._rcp_dx
 
-                # Compute turbulent spectral radius
-                tlami = twave_speed(ul, nfi, rcp_dxi, mu, mut)
-                tlam[lti][lfi, lei] = tlami
+            # Get viscous Jacobian type
+            vistype = self.cfg.get('solver-time-integrator', 'visflux-jacobian', 'tlns')
 
-        return self.be.make_loop(self.nfpts, comm_spr)
-    
-    def _make_aprx_jac(self):
-        from pybaram.solvers.euler.jacobian import make_convective_jacobian
-        from pybaram.solvers.navierstokes.jacobian import get_viscous_jacobian
+            # Get Jacobian functions
+            pos_jacobian = make_convective_jacobian(self.be, cplargs, 'positive')
+            vis_jacobian = get_viscous_jacobian(vistype, self.be, cplargs)
+            turb_jacobian = self.ele0.make_turb_jacobian()
 
-        nvars, nfvars = self.nvars, self.nfvars
-        ntvars = nvars - nfvars
+            def comm_flux_ajac(i_begin, i_end, muf, gradf, rhs, uf, jmats, tjmats):
+                for idx in range(i_begin, i_end):
+                    fn = array((nvars,))
+                    um = array((nvars,))
 
-        # Left and right indices
-        lt, le, lf = self._lidx
-        nf = self._vec_snorm
-        ydist = self.ydist
-        
-        # reciprocal of distance between two cells
-        rcp_dx = self._rcp_dx
+                    ap = array((nfvars, nfvars))
+                    at = array((ntvars, ntvars))
 
-        cplargs = {
-            'ndims': self.ndims,
-            'nfvars': self.nfvars,
-            'gamma': self.ele0._const['gamma'],
-            'pr': self.ele0._const['pr'],
-            'to_prim': self.ele0.to_flow_primevars()
-        }
+                    # Normal vector and wall distance (ydns)
+                    nfi = nf[:, idx]
+                    ydnsi = ydist[idx]
+                    rcp_dxi = rcp_dx[idx]
 
-        # Get viscous Jacobian type
-        vistype = self.cfg.get('solver-time-integrator', 'visflux-jacobian', 'tlns')
+                    # Left and right solutions
+                    lti, lfi, lei = lt[idx], lf[idx], le[idx]
+                    ul = uf[lti][lfi, :, lei]
+                    ur = rhs[:, idx]
 
-        # Get Jacobian functions
-        pos_jacobian = make_convective_jacobian(self.be, cplargs, 'positive')
-        vis_jacobian = get_viscous_jacobian(vistype, self.be, cplargs)
-        turb_jacobian = self.ele0.make_turb_jacobian()
+                    # Gradient and solution at face
+                    gf = gradf[:, :, idx]
 
-        # Temporal matrix
-        array = self.be.local()
+                    for jdx in range(nvars):
+                        um[jdx] = 0.5*(ul[jdx] + ur[jdx])
 
-        def comm_apj(i_begin, i_end, muf, gradf, uf, jmats, tjmats):
-            for idx in range(i_begin, i_end):
-                ap = array((nfvars, nfvars))
-                at = array((ntvars, ntvars))
+                    # Compute approixmate Riemann solver
+                    flux(ul, ur, nfi, fn)
+                    
+                    # Compute viscosity and viscous flux
+                    muf[0, idx] = mu = compute_mu(um)
+                    muf[1, idx] = mut = compute_mut(um, gf, mu, ydnsi)
+                    visflux(um, gf, nfi, mu, mut, fn)
 
-                # Normal vector
-                nfi = nf[:, idx]
-                rcp_dxi = rcp_dx[idx]
+                    # Compute turbulent flux
+                    tflux(ul, ur, um, gf, nfi, ydnsi, mu, mut, fn)
 
-                # Left and right solutions
-                lti, lfi, lei = lt[idx], lf[idx], le[idx]
-                ul = uf[lti][lfi, :, lei]
+                    # Compute Jacobian matrix on surface
+                    # based on left/right cell
+                    pos_jacobian(ul, nfi, ap)
+                    vis_jacobian(ul, nfi, ap, mu, rcp_dxi)
 
-                # Get viscosity on face (saved at rhside)
-                mu = muf[0, idx]
-                mut = muf[1, idx]
+                    for row in range(nfvars):
+                        for col in range(nfvars):
+                            jmats[lti][0, row, col, lfi, lei] = ap[row][col]
 
-                # Compute Jacobian matrix on surface
-                # based on left/right cell
-                pos_jacobian(ul, nfi, ap)
-                vis_jacobian(ul, nfi, ap, mu, rcp_dxi)
+                    # Turbulent Jacobian
+                    turb_jacobian(ul, nfi, at, rcp_dxi, mu, mut, gf, ydnsi)
+                    for row in range(ntvars):
+                        for col in range(ntvars):
+                            tjmats[lti][0, row, col, lfi, lei] = at[row][col]
 
-                for row in range(nfvars):
-                    for col in range(nfvars):
-                        jmats[lti][0, row, col, lfi, lei] = ap[row][col]
-                
-                # Turbulent Jacobian
-                gf = gradf[:, :, idx]
-                ydnsi = ydist[idx]
-                
-                turb_jacobian(ul, nfi, at, rcp_dxi, mu, mut, gf, ydnsi)
-                for row in range(ntvars):
-                    for col in range(ntvars):
-                        tjmats[lti][0, row, col, lfi, lei] = at[row][col]
+                    for jdx in range(nvars):
+                        # Save it at left solution array
+                        uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-        return self.be.make_loop(self.nfpts, comm_apj)
+            return self.be.make_loop(self.nfpts, comm_flux_ajac)
+        else:
+            def comm_flux(i_begin, i_end, muf, gradf, rhs, uf):
+                for idx in range(i_begin, i_end):
+                    fn = array((nvars,))
+                    um = array((nvars,))
 
+                    # Normal vector and wall distance (ydns)
+                    nfi = nf[:, idx]
+                    ydnsi = ydist[idx]
+
+                    # Left and right solutions
+                    lti, lfi, lei = lt[idx], lf[idx], le[idx]
+                    ul = uf[lti][lfi, :, lei]
+                    ur = rhs[:, idx]
+
+                    # Gradient and solution at face
+                    gf = gradf[:, :, idx]
+
+                    for jdx in range(nvars):
+                        um[jdx] = 0.5*(ul[jdx] + ur[jdx])
+
+                    # Compute approixmate Riemann solver
+                    flux(ul, ur, nfi, fn)
+                    
+                    # Compute viscosity and viscous flux
+                    muf[0, idx] = mu = compute_mu(um)
+                    muf[1, idx] = mut = compute_mut(um, gf, mu, ydnsi)
+                    visflux(um, gf, nfi, mu, mut, fn)
+
+                    # Compute turbulent flux
+                    tflux(ul, ur, um, gf, nfi, ydnsi, mu, mut, fn)
+
+                    for jdx in range(nvars):
+                        # Save it at left solution array
+                        uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
+
+            return self.be.make_loop(self.nfpts, comm_flux)
+ 
 
 class RANSBCInters(BaseAdvecDiffBCInters):
     is_vis_wall = False
@@ -489,18 +518,19 @@ class RANSBCInters(BaseAdvecDiffBCInters):
 
         # Kernel to compute flux
         fpts, gradf = self._fpts, self._gradf
-        self.compute_flux = Kernel(self._make_flux(), muf, gradf, fpts)
 
         if impl_op == 'spectral-radius':
             # Kernel to compute Spectral radius
             fspr = tuple(cell.fspr for cell in elemap.values())
             tfspr = tuple(cell.tfspr for cell in elemap.values())
-            self.compute_spec_rad = Kernel(self._make_spec_rad(), muf, fpts, fspr, tfspr)
+            self.compute_flux = Kernel(self._make_flux(impl_op), muf, gradf, fpts, fspr, tfspr)
         elif impl_op == 'approx-jacobian':
             # Kernel to compute Jacobian matrices
             fjmat = tuple(cell.jmat for cell in elemap.values())
             tfjmat = tuple(cell.tjmat for cell in elemap.values())
-            self.compute_aprx_jac = Kernel(self._make_aprx_jac(), muf, gradf, fpts, fjmat, tfjmat)
+            self.compute_flux = Kernel(self._make_flux(impl_op), muf, gradf, fpts, fjmat, tfjmat)
+        else:
+            self.compute_flux = Kernel(self._make_flux(impl_op), muf, gradf, fpts)
 
     def _make_delu(self):
         nvars, ndims = self.nvars, self.ndims
@@ -532,7 +562,7 @@ class RANSBCInters(BaseAdvecDiffBCInters):
 
         return self.be.make_loop(self.nfpts, compute_delu)
         
-    def _make_flux(self):
+    def _make_flux(self, impl_op):
         ndims, nvars, nfvars = self.ndims, self.nvars, self.nfvars
 
         lt, le, lf = self._lidx
@@ -565,155 +595,188 @@ class RANSBCInters(BaseAdvecDiffBCInters):
         # Get bc function (`self.bc` was defined at `baseadvec.inters`)
         bc = self.bc
 
-        def comm_flux(i_begin, i_end, muf, gradf, uf):
-            for idx in range(i_begin, i_end):
-                fn = array((nvars,))
-                um = array((nvars,))
-                ur = array((nvars,))
+        if impl_op == 'spectral-radius':
+            # reciprocal of distance between two cells
+            rcp_dx = self._rcp_dx
 
-                # Normal vector and wall distance (ydns)
-                nfi = nf[:, idx]
-                ydnsi = ydist[idx]
+            # Get wave speed function
+            wave_speed = self.ele0.make_wave_speed()
+            twave_speed = self.ele0.make_turb_wave_speed()
 
-                # Left solutions
-                lti, lfi, lei = lt[idx], lf[idx], le[idx]
-                ul = uf[lti][lfi, :, lei]
+            def comm_flux_spr(i_begin, i_end, muf, gradf, uf, lam, tlam):
+                for idx in range(i_begin, i_end):
+                    fn = array((nvars,))
+                    um = array((nvars,))
+                    ur = array((nvars,))
 
-                # Gradient at face
-                gf = gradf[:, :, idx]
+                    # Normal vector and wall distance (ydns)
+                    nfi = nf[:, idx]
+                    ydnsi = ydist[idx]
+                    rcp_dxi = rcp_dx[idx]
 
-                # Viscosity from left solution
-                mul = compute_mu(ul)
+                    # Left solutions
+                    lti, lfi, lei = lt[idx], lf[idx], le[idx]
+                    ul = uf[lti][lfi, :, lei]
 
-                # Compute BC
-                bc(ul, ur, nfi, mul, ydnsi)
+                    # Gradient at face
+                    gf = gradf[:, :, idx]
 
-                # Solution at face
-                for jdx in range(nvars):
-                    um[jdx] = 0.5*(ul[jdx] + ur[jdx])
+                    # Viscosity from left solution
+                    mul = compute_mu(ul)
 
-                # Compute approixmate Riemann solver
-                flux(ul, ur, nfi, fn)
-                
-                # Compute viscosity and viscous flux
-                muf[0, idx] = mu = compute_mu(um)
-                muf[1, idx] = mut = compute_mut(um, gf, mu, ydnsi)
-                visflux(um, gf, nfi, mu, mut, fn)
+                    # Compute BC
+                    bc(ul, ur, nfi, mul, ydnsi)
 
-                # Compute turbulent flux
-                tflux(ul, ur, um, gf, nfi, ydnsi, mu, mut, fn)
+                    # Solution at face
+                    for jdx in range(nvars):
+                        um[jdx] = 0.5*(ul[jdx] + ur[jdx])
 
-                for jdx in range(nvars):
-                    # Save it at left solution array
-                    uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
+                    # Compute approixmate Riemann solver
+                    flux(ul, ur, nfi, fn)
+                    
+                    # Compute viscosity and viscous flux
+                    muf[0, idx] = mu = compute_mu(um)
+                    muf[1, idx] = mut = compute_mut(um, gf, mu, ydnsi)
+                    visflux(um, gf, nfi, mu, mut, fn)
 
-        return self.be.make_loop(self.nfpts, comm_flux)
+                    # Compute turbulent flux
+                    tflux(ul, ur, um, gf, nfi, ydnsi, mu, mut, fn)
 
-    def _make_spec_rad(self):
-        lt, le, lf = self._lidx
-        nf = self._vec_snorm
-        
-        # reciprocal of distance between two cells
-        rcp_dx = self._rcp_dx
+                    # Compute spectral radius on face
+                    lami = wave_speed(ul, nfi, rcp_dxi, mu, mut)
+                    lam[lti][lfi, lei] = lami
 
-        # Get wave speed function
-        wave_speed = self.ele0.make_wave_speed()
-        twave_speed = self.ele0.make_turb_wave_speed()
+                    # Compute turbulent spectral radius
+                    tlami = twave_speed(ul, nfi, rcp_dxi, mu, mut)
+                    tlam[lti][lfi, lei] = tlami
 
-        def comm_spr(i_begin, i_end, muf, uf, lam, tlam):
-            for idx in range(i_begin, i_end):
-                # Normal vector
-                nfi = nf[:, idx]
-                rcp_dxi = rcp_dx[idx]
+                    for jdx in range(nvars):
+                        # Save it at left solution array
+                        uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-                # Left solution
-                lti, lfi, lei = lt[idx], lf[idx], le[idx]
-                ul = uf[lti][lfi, :, lei]
+            return self.be.make_loop(self.nfpts, comm_flux_spr)
+        elif impl_op == 'approx-jacobian':
+            from pybaram.solvers.euler.jacobian import make_convective_jacobian
+            from pybaram.solvers.navierstokes.jacobian import get_viscous_jacobian
 
-                # Get viscosity on face (saved at rhside)
-                mu = muf[0, idx]
-                mut = muf[1, idx]
+            ntvars = nvars - nfvars
 
-                # Compute spectral radius on face
-                lami = wave_speed(ul, nfi, rcp_dxi, mu, mut)
-                lam[lti][lfi, lei] = lami
+            # reciprocal of distance between two cells
+            rcp_dx = self._rcp_dx
 
-                # Compute turbulent spectral radius
-                tlami = twave_speed(ul, nfi, rcp_dxi, mu, mut)
-                tlam[lti][lfi, lei] = tlami
+            # Get viscous Jacobian type
+            vistype = self.cfg.get('solver-time-integrator', 'visflux-jacobian', 'tlns')
 
-        return self.be.make_loop(self.nfpts, comm_spr)
-    
-    def _make_aprx_jac(self):
-        from pybaram.solvers.euler.jacobian import make_convective_jacobian
-        from pybaram.solvers.navierstokes.jacobian import get_viscous_jacobian
+            # Get Jacobian functions
+            pos_jacobian = make_convective_jacobian(self.be, cplargs, 'positive')
+            vis_jacobian = get_viscous_jacobian(vistype, self.be, cplargs)
+            turb_jacobian = self.ele0.make_turb_jacobian()
 
-        nvars, nfvars = self.nvars, self.nfvars
-        ntvars = nvars - nfvars
+            def comm_flux_ajac(i_begin, i_end, muf, gradf, uf, jmats, tjmats):
+                for idx in range(i_begin, i_end):
+                    fn = array((nvars,))
+                    um = array((nvars,))
+                    ur = array((nvars,))
 
-        # Left and right indices
-        lt, le, lf = self._lidx
-        nf = self._vec_snorm
-        ydist = self.ydist
-        
-        # reciprocal of distance between two cells
-        rcp_dx = self._rcp_dx
+                    ap = array((nfvars, nfvars))
+                    at = array((ntvars, ntvars))
 
-        cplargs = {
-            'ndims': self.ndims,
-            'nfvars': self.nfvars,
-            'gamma': self.ele0._const['gamma'],
-            'pr': self.ele0._const['pr'],
-            'to_prim': self.ele0.to_flow_primevars()
-        }
+                    # Normal vector and wall distance (ydns)
+                    nfi = nf[:, idx]
+                    ydnsi = ydist[idx]
+                    rcp_dxi = rcp_dx[idx]
 
-        # Get viscous Jacobian type
-        vistype = self.cfg.get('solver-time-integrator', 'visflux-jacobian', 'tlns')
+                    # Left solutions
+                    lti, lfi, lei = lt[idx], lf[idx], le[idx]
+                    ul = uf[lti][lfi, :, lei]
 
-        # Get Jacobian functions
-        pos_jacobian = make_convective_jacobian(self.be, cplargs, 'positive')
-        vis_jacobian = get_viscous_jacobian(vistype, self.be, cplargs)
-        turb_jacobian = self.ele0.make_turb_jacobian()
+                    # Gradient at face
+                    gf = gradf[:, :, idx]
 
-        # Temporal matrix
-        array = self.be.local()
+                    # Viscosity from left solution
+                    mul = compute_mu(ul)
 
-        def comm_apj(i_begin, i_end, muf, gradf, uf, jmats, tjmats):
-            for idx in range(i_begin, i_end):
-                ap = array((nfvars, nfvars))
-                at = array((ntvars, ntvars))
+                    # Compute BC
+                    bc(ul, ur, nfi, mul, ydnsi)
 
-                # Normal vector
-                nfi = nf[:, idx]
-                rcp_dxi = rcp_dx[idx]
+                    # Solution at face
+                    for jdx in range(nvars):
+                        um[jdx] = 0.5*(ul[jdx] + ur[jdx])
 
-                # Left and right solutions
-                lti, lfi, lei = lt[idx], lf[idx], le[idx]
-                ul = uf[lti][lfi, :, lei]
+                    # Compute approixmate Riemann solver
+                    flux(ul, ur, nfi, fn)
+                    
+                    # Compute viscosity and viscous flux
+                    muf[0, idx] = mu = compute_mu(um)
+                    muf[1, idx] = mut = compute_mut(um, gf, mu, ydnsi)
+                    visflux(um, gf, nfi, mu, mut, fn)
 
-                # Get viscosity on face (saved at rhside)
-                mu = muf[0, idx]
-                mut = muf[1, idx]
+                    # Compute turbulent flux
+                    tflux(ul, ur, um, gf, nfi, ydnsi, mu, mut, fn)
 
-                # Compute Jacobian matrix on surface
-                # based on left/right cell
-                pos_jacobian(ul, nfi, ap)
-                vis_jacobian(ul, nfi, ap, mu, rcp_dxi)
+                    # Compute Jacobian matrix on surface
+                    # based on left/right cell
+                    pos_jacobian(ul, nfi, ap)
+                    vis_jacobian(ul, nfi, ap, mu, rcp_dxi)
 
-                for row in range(nfvars):
-                    for col in range(nfvars):
-                        jmats[lti][0, row, col, lfi, lei] = ap[row][col]
-                
-                # Turbulent Jacobian
-                gf = gradf[:, :, idx]
-                ydnsi = ydist[idx]
-                
-                turb_jacobian(ul, nfi, at, rcp_dxi, mu, mut, gf, ydnsi)
-                for row in range(ntvars):
-                    for col in range(ntvars):
-                        tjmats[lti][0, row, col, lfi, lei] = at[row][col]
+                    for row in range(nfvars):
+                        for col in range(nfvars):
+                            jmats[lti][0, row, col, lfi, lei] = ap[row][col]
 
-        return self.be.make_loop(self.nfpts, comm_apj)
+                    turb_jacobian(ul, nfi, at, rcp_dxi, mu, mut, gf, ydnsi)
+                    for row in range(ntvars):
+                        for col in range(ntvars):
+                            tjmats[lti][0, row, col, lfi, lei] = at[row][col]
+
+                    for jdx in range(nvars):
+                        # Save it at left solution array
+                        uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
+
+            return self.be.make_loop(self.nfpts, comm_flux_ajac)
+        else:
+            def comm_flux(i_begin, i_end, muf, gradf, uf):
+                for idx in range(i_begin, i_end):
+                    fn = array((nvars,))
+                    um = array((nvars,))
+                    ur = array((nvars,))
+
+                    # Normal vector and wall distance (ydns)
+                    nfi = nf[:, idx]
+                    ydnsi = ydist[idx]
+
+                    # Left solutions
+                    lti, lfi, lei = lt[idx], lf[idx], le[idx]
+                    ul = uf[lti][lfi, :, lei]
+
+                    # Gradient at face
+                    gf = gradf[:, :, idx]
+
+                    # Viscosity from left solution
+                    mul = compute_mu(ul)
+
+                    # Compute BC
+                    bc(ul, ur, nfi, mul, ydnsi)
+
+                    # Solution at face
+                    for jdx in range(nvars):
+                        um[jdx] = 0.5*(ul[jdx] + ur[jdx])
+
+                    # Compute approixmate Riemann solver
+                    flux(ul, ur, nfi, fn)
+                    
+                    # Compute viscosity and viscous flux
+                    muf[0, idx] = mu = compute_mu(um)
+                    muf[1, idx] = mut = compute_mut(um, gf, mu, ydnsi)
+                    visflux(um, gf, nfi, mu, mut, fn)
+
+                    # Compute turbulent flux
+                    tflux(ul, ur, um, gf, nfi, ydnsi, mu, mut, fn)
+
+                    for jdx in range(nvars):
+                        # Save it at left solution array
+                        uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
+
+            return self.be.make_loop(self.nfpts, comm_flux)
 
 
 class RANSSlipWallBCInters(RANSBCInters):
