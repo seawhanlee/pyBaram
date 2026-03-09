@@ -6,7 +6,7 @@ def make_convective_jacobian(be, cplargs, sign):
     
     gamma = cplargs['gamma']
     ndims = cplargs['ndims']
-    to_prim = cplargs['to_prim']
+    to_prim = cplargs['to_primevars']
     array = be.local()
 
     # Constants
@@ -174,7 +174,7 @@ def make_convective_jacobian(be, cplargs, sign):
 def make_inviscid_jacobian(be, cplargs):
 
     gamma = cplargs['gamma']
-    to_prim = cplargs['to_prim']
+    to_prim = cplargs['to_primevars']
     ndims = cplargs['ndims']
     array = be.local()
 
