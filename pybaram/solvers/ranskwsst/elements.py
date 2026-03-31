@@ -66,7 +66,7 @@ class RANSKWSSTFluidElements(ViscousFluidElements):
         def tflux(u, nf, f):
             # Convective flux for turbulent variables
             rho = u[0]
-            contrav = dot(u, nf, ndims, 1)/rho
+            contrav = dot(u, nf, ndims, 1, 0)/rho
 
             f[0] = u[nvars-2]*contrav
             f[1] = u[nvars-1]*contrav
@@ -195,9 +195,7 @@ class RANSKWSSTElements(RANSElements, RANSKWSSTFluidElements):
         _compute_mu = self.mu_container()
         _compute_mut = self.mut_container()
 
-        ydist = self.ydist
-
-        def post(i_begin, i_end, upts, grad, mu, mut):
+        def post(i_begin, i_end, ydist, upts, grad, mu, mut):
             # Apply the function over eleemnts
             for idx in range(i_begin, i_end):
                 _fix_nonPys(upts[:, idx])
@@ -215,7 +213,7 @@ class RANSKWSSTElements(RANSElements, RANSKWSSTFluidElements):
 
         def _lambdaf(u, nf, rcp_dx, mu, mut):
             rho = u[0]
-            contra = dot(u, nf, ndims, 1)/rho
+            contra = dot(u, nf, ndims, 1, 0)/rho
 
             # Wave speed : abs(Vn) + 1/dx/rho/sigma*(mu+mut)
             return abs(contra) + rcp_dx*(mu + mut)/rho/sigma
@@ -252,7 +250,7 @@ class RANSKWSSTElements(RANSElements, RANSKWSSTFluidElements):
             sigw = f1*sigmaw1 + (1-f1)*sigmaw2
             
             rho = um[0]
-            contra = dot(um, nf, ndims, 1)/rho
+            contra = dot(um, nf, ndims, 1, 0)/rho
             contrap = 0.5*(contra + op*abs(contra))
 
             A[0][0] = contrap + op*rcp_dx*(mu + sigk*mut)/rho

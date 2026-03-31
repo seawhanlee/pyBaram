@@ -16,9 +16,9 @@ def get_bc(self, be, name, bcargs):
     else:
         tbc = be.compile(make_turb_bc_ext(bcargs))
 
-    def bc(ul, ur, nf, *args):
+    def bc(ul, ur, nf, mu, d1):
         cbc(ul, ur, nf)
-        tbc(ul, ur, nf, *args)
+        tbc(ul, ur, nf, mu, d1)
 
     return be.compile(bc)
 
@@ -42,7 +42,7 @@ def make_turb_bc_far(bcargs):
     wf, kf = bcargs['omega'], bcargs['k']
     nvars = bcargs['nvars']
 
-    def bc(ul, ur, *args):
+    def bc(ul, ur, nf, mu, d1):
         rho = ul[0]
         ur[nvars-2] = rho*kf
         ur[nvars-1] = rho*wf
@@ -53,7 +53,7 @@ def make_turb_bc_far(bcargs):
 def make_turb_bc_ext(bcargs):
     nvars = bcargs['nvars']
 
-    def bc(ul, ur, *args):
+    def bc(ul, ur, nf, mu, d1):
         ur[nvars-2] = ul[nvars-2]
         ur[nvars-1] = ul[nvars-1]
 

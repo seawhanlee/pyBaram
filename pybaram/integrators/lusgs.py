@@ -4,7 +4,7 @@ import numpy as np
 def make_diff_flux(nvars, dnv, fluxf, array):
     # Difference of flux vectors
     def _diff_flux(u, du, df, nf):
-        f = array((dnv,))
+        f = array((dnv,), np.float64)
         for i in range(nvars):
             du[i] += u[i]
 
@@ -34,10 +34,7 @@ def make_lusgs_common(ele, factor=1.0):
     # Number of faces
     nface = ele.nface
 
-    # Normal vectors for faces and displacement from cell center to neighbor cells
-    fnorm_vol = ele.mag_fnorm * ele.rcp_vol
-
-    def _pre_lusgs(i_begin, i_end, dt, diag, lambdaf):
+    def _pre_lusgs(i_begin, i_end, fnorm_vol, dt, diag, lambdaf):
         # Construct Matrices for LU-SGS
         for idx in range(i_begin, i_end):
             # Diagonals of implicit operator
@@ -59,13 +56,8 @@ def make_lusgs_common(ele, factor=1.0):
 def make_serial_lusgs(be, ele, nv, _flux):
     # dimensions for variable and face
     nvars, nface = ele.nvars, ele.nface
-    dnv = nv[1] - nv[0]
-
-    # Normal vectors at faces
-    fnorm_vol, vec_fnorm = ele.mag_fnorm * ele.rcp_vol, ele.vec_fnorm
-
-    # Get index array for neihboring cells
-    nei_ele = ele.nei_ele
+    dnv = int(nv[1] - nv[0])
+    nv0, nv1 = nv[0], nv[1]
 
     # Local array function
     array = be.local()
@@ -73,12 +65,13 @@ def make_serial_lusgs(be, ele, nv, _flux):
     # Pre-compile function to compute difference of flux vector
     _diff_flux = be.compile(make_diff_flux(nvars, dnv, _flux, array))
 
-    def _lower_sweep(i_begin, i_end, uptsb, rhsb, dub, diag, dsrc, lambdaf):
+    def _lower_sweep(i_begin, i_end, fnorm_vol, vec_fnorm, nei_ele,
+                     uptsb, rhsb, dub, diag, dsrc, lambdaf):
         # Lower sweep via mapping
         for idx in range(i_begin, i_end):
-            du = array((nvars,))
-            dfj = array((dnv,))
-            df = array((dnv,))
+            du = array((nvars,), np.float64)
+            dfj = array((dnv,), np.float64)
+            df = array((dnv,), np.float64)
 
             for kdx in range(dnv):
                 df[kdx] = 0.0
@@ -94,26 +87,27 @@ def make_serial_lusgs(be, ele, nv, _flux):
                     for kdx in range(nvars):
                         du[kdx] = 0.0
 
-                    for kdx in range(nv[0], nv[1]):
+                    for kdx in range(nv0, nv1):
                         du[kdx] = dub[kdx, neib]
 
                     _diff_flux(u, du, dfj, nf)
 
                     for kdx in range(dnv):
                         df[kdx] += (dfj[kdx] - lambdaf[jdx, idx]
-                                    * dub[kdx+nv[0], neib])*fnorm_vol[jdx, idx]
+                                    * dub[kdx+nv0, neib])*fnorm_vol[jdx, idx]
 
             for kdx in range(dnv):
                 # Gauss-Siedel Update residual with lower portion
-                dub[kdx+nv[0], idx] = (rhsb[kdx+nv[0], idx] -
-                                       0.5*df[kdx])/(diag[idx] + dsrc[kdx+nv[0], idx])
+                dub[kdx+nv0, idx] = (rhsb[kdx+nv0, idx] -
+                                       0.5*df[kdx])/(diag[idx] + dsrc[kdx+nv0, idx])
 
-    def _upper_sweep(i_begin, i_end, uptsb, rhsb, dub, diag, dsrc, lambdaf):
+    def _upper_sweep(i_begin, i_end, fnorm_vol, vec_fnorm, nei_ele,
+                     uptsb, rhsb, dub, diag, dsrc, lambdaf):
         for idx in range(i_end-1, i_begin-1, -1):
             # Upper sweep via mapping (reverse order)
-            du = array((nvars,))
-            dfj = array((dnv,))
-            df = array((dnv,))
+            du = array((nvars,), np.float64)
+            dfj = array((dnv,), np.float64)
+            df = array((dnv,), np.float64)
 
             for kdx in range(dnv):
                 df[kdx] = 0.0
@@ -129,33 +123,28 @@ def make_serial_lusgs(be, ele, nv, _flux):
                     for kdx in range(nvars):
                         du[kdx] = 0.0
                         
-                    for kdx in range(nv[0], nv[1]):
+                    for kdx in range(nv0, nv1):
                         du[kdx] = rhsb[kdx, neib]
 
                     _diff_flux(u, du, dfj, nf)
 
                     for kdx in range(dnv):
                         df[kdx] += (dfj[kdx] - lambdaf[jdx, idx]
-                                    * rhsb[kdx+nv[0], neib])*fnorm_vol[jdx, idx]
+                                    * rhsb[kdx+nv0, neib])*fnorm_vol[jdx, idx]
 
             for kdx in range(dnv):
                 # Gauss-Siedel Update residual with upper portion
-                rhsb[kdx+nv[0], idx] = dub[kdx+nv[0], idx] - \
-                    0.5*df[kdx]/(diag[idx] + dsrc[kdx+nv[0], idx])
+                rhsb[kdx+nv0, idx] = dub[kdx+nv0, idx] - \
+                    0.5*df[kdx]/(diag[idx] + dsrc[kdx+nv0, idx])
 
     return _lower_sweep, _upper_sweep
 
 
-def make_colored_lusgs(be, ele, nv, icolor, lcolor, _flux):
+def make_colored_lusgs(be, ele, nv, _flux):
     # dimensions for variable and face
     nvars, nface = ele.nvars, ele.nface
-    dnv = nv[1] - nv[0]
-
-    # Normal vectors at faces
-    fnorm_vol, vec_fnorm = ele.mag_fnorm * ele.rcp_vol, ele.vec_fnorm
-
-    # Get index array for neihboring cells
-    nei_ele = ele.nei_ele
+    dnv = int(nv[1] - nv[0])
+    nv0, nv1 = nv[0], nv[1]
 
     # Local array function
     array = be.local()
@@ -163,15 +152,16 @@ def make_colored_lusgs(be, ele, nv, icolor, lcolor, _flux):
     # Pre-compile function to compute difference of flux vector
     _diff_flux = be.compile(make_diff_flux(nvars, dnv, _flux, array))
 
-    def _lower_sweep(i_begin, i_end, uptsb, rhsb, dub, diag, dsrc, lambdaf):
+    def _lower_sweep(i_begin, i_end, fnorm_vol, vec_fnorm, nei_ele, icolor, lcolor,
+                     uptsb, rhsb, dub, diag, dsrc, lambdaf):
         for _idx in range(i_begin, i_end):
             # Lower sweep with coloring
             idx = icolor[_idx]
             curr_level = lcolor[idx]
 
-            du = array((nvars,))
-            dfj = array((dnv,))
-            df = array((dnv,))
+            du = array((nvars,), np.float64)
+            dfj = array((dnv,), np.float64)
+            df = array((dnv,), np.float64)
 
             for kdx in range(dnv):
                 df[kdx] = 0.0
@@ -188,30 +178,31 @@ def make_colored_lusgs(be, ele, nv, icolor, lcolor, _flux):
                     for kdx in range(nvars):
                         du[kdx] = 0.0
                         
-                    for kdx in range(nv[0], nv[1]):
+                    for kdx in range(nv0, nv1):
                         du[kdx] = dub[kdx, neib]
 
                     _diff_flux(u, du, dfj, nf)
 
                     for kdx in range(dnv):
                         df[kdx] += (dfj[kdx] - lambdaf[jdx, idx]
-                                    * dub[kdx+nv[0], neib])*fnorm_vol[jdx, idx]
+                                    * dub[kdx+nv0, neib])*fnorm_vol[jdx, idx]
 
             for kdx in range(dnv):
                 # Gauss-Siedel Update residual with lower portion
-                dub[kdx+nv[0], idx] = (rhsb[kdx+nv[0], idx] -
-                                       0.5*df[kdx])/(diag[idx] + dsrc[kdx+nv[0], idx])
+                dub[kdx+nv0, idx] = (rhsb[kdx+nv0, idx] -
+                                       0.5*df[kdx])/(diag[idx] + dsrc[kdx+nv0, idx])
 
-    def _upper_sweep(i_begin, i_end, uptsb, rhsb, dub, diag, dsrc, lambdaf):
+    def _upper_sweep(i_begin, i_end, fnorm_vol, vec_fnorm, nei_ele, icolor, lcolor,
+                     uptsb, rhsb, dub, diag, dsrc, lambdaf):
         #for _idx in range(i_end-1, i_begin-1, -1):
         for _idx in range(i_begin, i_end):
             # Upper sweep via coloring (reverse level of coloring)
             idx = icolor[_idx]
             curr_level = lcolor[idx]
 
-            du = array((nvars,))
-            dfj = array((dnv,))
-            df = array((dnv,))
+            du = array((nvars,), np.float64)
+            dfj = array((dnv,), np.float64)
+            df = array((dnv,), np.float64)
 
             for kdx in range(dnv):
                 df[kdx] = 0.0
@@ -227,18 +218,18 @@ def make_colored_lusgs(be, ele, nv, icolor, lcolor, _flux):
                     for kdx in range(nvars):
                         du[kdx] = 0.0
                         
-                    for kdx in range(nv[0], nv[1]):
+                    for kdx in range(nv0, nv1):
                         du[kdx] = rhsb[kdx, neib]
 
                     _diff_flux(u, du, dfj, nf)
 
                     for kdx in range(dnv):
                         df[kdx] += (dfj[kdx] - lambdaf[jdx, idx]
-                                    * rhsb[kdx+nv[0], neib])*fnorm_vol[jdx, idx]
+                                    * rhsb[kdx+nv0, neib])*fnorm_vol[jdx, idx]
 
             for kdx in range(dnv):
                 # Gauss-Siedel Update residual with upper portion
-                rhsb[kdx+nv[0], idx] = dub[kdx+nv[0], idx] - \
-                    0.5*df[kdx]/(diag[idx] + dsrc[kdx+nv[0], idx])
+                rhsb[kdx+nv0, idx] = dub[kdx+nv0, idx] - \
+                    0.5*df[kdx]/(diag[idx] + dsrc[kdx+nv0, idx])
 
     return _lower_sweep, _upper_sweep

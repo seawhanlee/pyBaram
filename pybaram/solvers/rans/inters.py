@@ -12,14 +12,15 @@ import re
 class RANSIntInters(BaseAdvecDiffIntInters):
     def construct_kernels(self, elemap, impl_op):
         # Wall distance at face
-        ydistf = [cell.ydist for cell in elemap.values()]
-        self.ydist = np.array([ydistf[t][e]  for (t, e, _) in self._lidx.T])
+        ydistf = [cell.rawydist for cell in elemap.values()]
+        _ydist = np.array([ydistf[t][e]  for (t, e, _) in self.rawlidx.T])
+        self.ydist = self.be.convert_array(_ydist)
 
         # Call Parent method
         super().construct_kernels(elemap)
 
         # Save viscosity on face (for implicit operator)
-        muf = np.empty((2,self.nfpts))
+        self.muf = muf = self.be.alloc_array((2, self.nfpts))
 
         # Collect face point array
         fpts, gradf = self._fpts, self._gradf
@@ -28,21 +29,22 @@ class RANSIntInters(BaseAdvecDiffIntInters):
             # Collect array to save spectral raidus
             fspr = tuple(cell.fspr for cell in elemap.values())
             tfspr = tuple(cell.tfspr for cell in elemap.values())
-            self.compute_flux = Kernel(self._make_flux(impl_op), muf, gradf, fpts, fspr, tfspr)
+            self.compute_flux = Kernel(*self._make_flux(impl_op), muf, gradf, fpts, fspr, tfspr)
         elif impl_op == 'approx-jacobian':
             # Collect array to save Jacobian
             fjmat = tuple(cell.jmat for cell in elemap.values())
             tfjmat = tuple(cell.tjmat for cell in elemap.values())
-            self.compute_flux = Kernel(self._make_flux(impl_op), muf, gradf, fpts, fjmat, tfjmat)
+            self.compute_flux = Kernel(*self._make_flux(impl_op), muf, gradf, fpts, fjmat, tfjmat)
         else:
-            self.compute_flux = Kernel(self._make_flux(impl_op), muf, gradf, fpts)
+            self.compute_flux = Kernel(*self._make_flux(impl_op), muf, gradf, fpts)
 
     def _make_flux(self, impl_op):
         ndims, nvars, nfvars = self.ndims, self.nvars, self.nfvars
 
-        lt, le, lf = self._lidx
-        rt, re, rf = self._ridx
-        nf, sf = self._vec_snorm, self._mag_snorm
+        # Constant arrays
+        lidx = self.lidx
+        ridx = self.ridx
+        nf, sf = self.vec_snorm, self.mag_snorm
         ydist = self.ydist
 
         # Compiler arguments
@@ -70,16 +72,16 @@ class RANSIntInters(BaseAdvecDiffIntInters):
 
         if impl_op == 'spectral-radius':
             # reciprocal of distance between two cells
-            rcp_dx = self._rcp_dx
+            rcp_dx = self.rcp_dx
 
             # Get wave speed function
             wave_speed = self.ele0.make_wave_speed()
             twave_speed = self.ele0.make_turb_wave_speed()
 
-            def comm_flux_spr(i_begin, i_end, muf, gradf, uf, lam, tlam):
+            def comm_flux_spr(i_begin, i_end, lidx, ridx, nf, sf, rcp_dx, ydist, muf, gradf, uf, lam, tlam):
                 for idx in range(i_begin, i_end):
-                    fn = array((nvars,))
-                    um = array((nvars,))
+                    fn = array((nvars,), np.float64)
+                    um = array((nvars,), np.float64)
 
                     # Normal vector and wall distance (ydns)
                     nfi = nf[:, idx]
@@ -87,8 +89,8 @@ class RANSIntInters(BaseAdvecDiffIntInters):
                     rcp_dxi = rcp_dx[idx]
 
                     # Left and right solutions
-                    lti, lfi, lei = lt[idx], lf[idx], le[idx]
-                    rti, rfi, rei = rt[idx], rf[idx], re[idx]
+                    lti, lei, lfi = lidx[:, idx]
+                    rti, rei, rfi = ridx[:, idx]
                     ul = uf[lti][lfi, :, lei]
                     ur = uf[rti][rfi, :, rei]
 
@@ -128,7 +130,7 @@ class RANSIntInters(BaseAdvecDiffIntInters):
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
                         uf[rti][rfi, jdx, rei] = -fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux_spr)
+            return self.be.make_loop(self.nfpts, comm_flux_spr, lidx, ridx, nf, sf, rcp_dx, ydist)
         elif impl_op == 'approx-jacobian':
             from pybaram.solvers.euler.jacobian import make_convective_jacobian
             from pybaram.solvers.navierstokes.jacobian import get_viscous_jacobian
@@ -146,17 +148,17 @@ class RANSIntInters(BaseAdvecDiffIntInters):
             turb_neg_jacobian = self.ele0.make_turb_jacobian('negative')
 
             # reciprocal of distance between two cells
-            rcp_dx = self._rcp_dx
+            rcp_dx = self.rcp_dx
 
-            def comm_flux_ajac(i_begin, i_end, muf, gradf, uf, jmats, tjmats):
+            def comm_flux_ajac(i_begin, i_end, lidx, ridx, nf, sf, rcp_dx, ydist, muf, gradf, uf, jmats, tjmats):
                 for idx in range(i_begin, i_end):
-                    fn = array((nvars,))
-                    um = array((nvars,))
+                    fn = array((nvars,), np.float64)
+                    um = array((nvars,), np.float64)
 
-                    ap = array((nfvars, nfvars))
-                    am = array((nfvars, nfvars))
-                    tap = array((ntvars, ntvars))
-                    tam = array((ntvars, ntvars))
+                    ap = array((nfvars, nfvars), np.float64)
+                    am = array((nfvars, nfvars), np.float64)
+                    tap = array((ntvars, ntvars), np.float64)
+                    tam = array((ntvars, ntvars), np.float64)
 
 
                     # Normal vector and wall distance (ydns)
@@ -165,8 +167,8 @@ class RANSIntInters(BaseAdvecDiffIntInters):
                     rcp_dxi = rcp_dx[idx]
 
                     # Left and right solutions
-                    lti, lfi, lei = lt[idx], lf[idx], le[idx]
-                    rti, rfi, rei = rt[idx], rf[idx], re[idx]
+                    lti, lei, lfi = lidx[:, idx]
+                    rti, rei, rfi = ridx[:, idx]
                     ul = uf[lti][lfi, :, lei]
                     ur = uf[rti][rfi, :, rei]
 
@@ -217,20 +219,20 @@ class RANSIntInters(BaseAdvecDiffIntInters):
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
                         uf[rti][rfi, jdx, rei] = -fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux_ajac)
+            return self.be.make_loop(self.nfpts, comm_flux_ajac, lidx, ridx, nf, sf, rcp_dx, ydist)
         else:
-            def comm_flux(i_begin, i_end, muf, gradf, uf):
+            def comm_flux(i_begin, i_end, lidx, ridx, nf, sf, ydist, muf, gradf, uf):
                 for idx in range(i_begin, i_end):
-                    fn = array((nvars,))
-                    um = array((nvars,))
+                    fn = array((nvars,), np.float64)
+                    um = array((nvars,), np.float64)
 
                     # Normal vector and wall distance (ydns)
                     nfi = nf[:, idx]
                     ydnsi = ydist[idx]
 
                     # Left and right solutions
-                    lti, lfi, lei = lt[idx], lf[idx], le[idx]
-                    rti, rfi, rei = rt[idx], rf[idx], re[idx]
+                    lti, lei, lfi = lidx[:, idx]
+                    rti, rei, rfi = ridx[:, idx]
                     ul = uf[lti][lfi, :, lei]
                     ur = uf[rti][rfi, :, rei]
 
@@ -256,20 +258,21 @@ class RANSIntInters(BaseAdvecDiffIntInters):
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
                         uf[rti][rfi, jdx, rei] = -fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux)
+            return self.be.make_loop(self.nfpts, comm_flux, lidx, ridx, nf, sf, ydist)
 
 
 class RANSMPIInters(BaseAdvecDiffMPIInters):
     def construct_kernels(self, elemap, impl_op):
         # Wall distance at face
-        ydistf = [cell.ydist for cell in elemap.values()]
-        self.ydist = np.array([ydistf[t][e]  for (t, e, _) in self._lidx.T])
+        ydistf = [cell.rawydist for cell in elemap.values()]
+        _ydist = np.array([ydistf[t][e]  for (t, e, _) in self.rawlidx.T])
+        self.ydist = self.be.convert_array(_ydist)
 
         # Call Parent method
         super().construct_kernels(elemap)
 
         # Save viscosity on face (for implicit operator)
-        muf = np.empty((2,self.nfpts))
+        self.muf = muf = self.be.alloc_array((2, self.nfpts))
 
         # Kernel to compute flux
         fpts, gradf = self._fpts, self._gradf
@@ -279,20 +282,20 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
             # Kernel to compute Spectral radius
             fspr = tuple(cell.fspr for cell in elemap.values())
             tfspr = tuple(cell.tfspr for cell in elemap.values())
-            self.compute_flux = Kernel(self._make_flux(impl_op), muf, gradf, rhs, fpts, fspr, tfspr)
+            self.compute_flux = Kernel(*self._make_flux(impl_op), muf, gradf, rhs, fpts, fspr, tfspr)
         elif impl_op == 'approx-jacobian':
             # Kernel to compute Jacobian matrices
             fjmat = tuple(cell.jmat for cell in elemap.values())
             tfjmat = tuple(cell.tjmat for cell in elemap.values())
-            self.compute_flux = Kernel(self._make_flux(impl_op), muf, gradf, rhs, fpts, fjmat, tfjmat)
+            self.compute_flux = Kernel(*self._make_flux(impl_op), muf, gradf, rhs, fpts, fjmat, tfjmat)
         else:
-            self.compute_flux = Kernel(self._make_flux(impl_op), muf, gradf, rhs, fpts)
+            self.compute_flux = Kernel(*self._make_flux(impl_op), muf, gradf, rhs, fpts)
 
     def _make_flux(self, impl_op):
         ndims, nvars, nfvars = self.ndims, self.nvars, self.nfvars
 
-        lt, le, lf = self._lidx
-        nf, sf = self._vec_snorm, self._mag_snorm
+        lidx = self.lidx
+        nf, sf = self.vec_snorm, self.mag_snorm
         ydist = self.ydist
 
         # Compiler arguments
@@ -320,16 +323,16 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
             
         if impl_op == 'spectral-radius':
             # reciprocal of distance between two cells
-            rcp_dx = self._rcp_dx
+            rcp_dx = self.rcp_dx
 
             # Get wave speed function
             wave_speed = self.ele0.make_wave_speed()
             twave_speed = self.ele0.make_turb_wave_speed()
 
-            def comm_flux_spr(i_begin, i_end, muf, gradf, rhs, uf, lam, tlam):
+            def comm_flux_spr(i_begin, i_end, lidx, nf, sf, rcp_dx, ydist, muf, gradf, rhs, uf, lam, tlam):
                 for idx in range(i_begin, i_end):
-                    fn = array((nvars,))
-                    um = array((nvars,))
+                    fn = array((nvars,), np.float64)
+                    um = array((nvars,), np.float64)
 
                     # Normal vector and wall distance (ydns)
                     nfi = nf[:, idx]
@@ -337,7 +340,7 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
                     rcp_dxi = rcp_dx[idx]
 
                     # Left and right solutions
-                    lti, lfi, lei = lt[idx], lf[idx], le[idx]
+                    lti, lei, lfi = lidx[:, idx]
                     ul = uf[lti][lfi, :, lei]
                     ur = rhs[:, idx]
 
@@ -370,7 +373,7 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
                         # Save it at left solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux_spr)
+            return self.be.make_loop(self.nfpts, comm_flux_spr, lidx, nf, sf, rcp_dx, ydist)
         elif impl_op == 'approx-jacobian':
             from pybaram.solvers.euler.jacobian import make_convective_jacobian
             from pybaram.solvers.navierstokes.jacobian import get_viscous_jacobian
@@ -378,7 +381,7 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
             ntvars = nvars - nfvars
 
             # reciprocal of distance between two cells
-            rcp_dx = self._rcp_dx
+            rcp_dx = self.rcp_dx
 
             # Get viscous Jacobian type
             vistype = self.cfg.get('solver-time-integrator', 'visflux-jacobian', 'tlns')
@@ -388,13 +391,13 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
             vis_jacobian = get_viscous_jacobian(vistype, self.be, cplargs)
             turb_jacobian = self.ele0.make_turb_jacobian()
 
-            def comm_flux_ajac(i_begin, i_end, muf, gradf, rhs, uf, jmats, tjmats):
+            def comm_flux_ajac(i_begin, i_end, lidx, nf, sf, rcp_dx, ydist, muf, gradf, rhs, uf, jmats, tjmats):
                 for idx in range(i_begin, i_end):
-                    fn = array((nvars,))
-                    um = array((nvars,))
+                    fn = array((nvars,), np.float64)
+                    um = array((nvars,), np.float64)
 
-                    ap = array((nfvars, nfvars))
-                    at = array((ntvars, ntvars))
+                    ap = array((nfvars, nfvars), np.float64)
+                    at = array((ntvars, ntvars), np.float64)
 
                     # Normal vector and wall distance (ydns)
                     nfi = nf[:, idx]
@@ -402,7 +405,7 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
                     rcp_dxi = rcp_dx[idx]
 
                     # Left and right solutions
-                    lti, lfi, lei = lt[idx], lf[idx], le[idx]
+                    lti, lei, lfi = lidx[:, idx]
                     ul = uf[lti][lfi, :, lei]
                     ur = rhs[:, idx]
 
@@ -442,19 +445,19 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
                         # Save it at left solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux_ajac)
+            return self.be.make_loop(self.nfpts, comm_flux_ajac, lidx, nf, sf, rcp_dx, ydist)
         else:
-            def comm_flux(i_begin, i_end, muf, gradf, rhs, uf):
+            def comm_flux(i_begin, i_end, lidx, nf, sf, ydist, muf, gradf, rhs, uf):
                 for idx in range(i_begin, i_end):
-                    fn = array((nvars,))
-                    um = array((nvars,))
+                    fn = array((nvars,), np.float64)
+                    um = array((nvars,), np.float64)
 
                     # Normal vector and wall distance (ydns)
                     nfi = nf[:, idx]
                     ydnsi = ydist[idx]
 
                     # Left and right solutions
-                    lti, lfi, lei = lt[idx], lf[idx], le[idx]
+                    lti, lei, lfi = lidx[:, idx]
                     ul = uf[lti][lfi, :, lei]
                     ur = rhs[:, idx]
 
@@ -479,7 +482,7 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
                         # Save it at left solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux)
+            return self.be.make_loop(self.nfpts, comm_flux, lidx, nf, sf, ydist)
  
 
 class RANSBCInters(BaseAdvecDiffBCInters):
@@ -507,14 +510,15 @@ class RANSBCInters(BaseAdvecDiffBCInters):
 
     def construct_kernels(self, elemap, impl_op):
         # Wall distance at face
-        ydistf = [cell.ydist for cell in elemap.values()]
-        self.ydist = np.array([ydistf[t][e]  for (t, e, _) in self._lidx.T])
+        ydistf = [cell.rawydist for cell in elemap.values()]
+        _ydist = np.array([ydistf[t][e]  for (t, e, _) in self.rawlidx.T])
+        self.ydist = self.be.convert_array(_ydist)
 
         # Call Parent method
         super().construct_kernels(elemap)
 
         # Save viscosity on face (for implicit operator)
-        muf = np.empty((2,self.nfpts))
+        self.muf = muf = self.be.alloc_array((2,self.nfpts))
 
         # Kernel to compute flux
         fpts, gradf = self._fpts, self._gradf
@@ -523,19 +527,19 @@ class RANSBCInters(BaseAdvecDiffBCInters):
             # Kernel to compute Spectral radius
             fspr = tuple(cell.fspr for cell in elemap.values())
             tfspr = tuple(cell.tfspr for cell in elemap.values())
-            self.compute_flux = Kernel(self._make_flux(impl_op), muf, gradf, fpts, fspr, tfspr)
+            self.compute_flux = Kernel(*self._make_flux(impl_op), muf, gradf, fpts, fspr, tfspr)
         elif impl_op == 'approx-jacobian':
             # Kernel to compute Jacobian matrices
             fjmat = tuple(cell.jmat for cell in elemap.values())
             tfjmat = tuple(cell.tjmat for cell in elemap.values())
-            self.compute_flux = Kernel(self._make_flux(impl_op), muf, gradf, fpts, fjmat, tfjmat)
+            self.compute_flux = Kernel(*self._make_flux(impl_op), muf, gradf, fpts, fjmat, tfjmat)
         else:
-            self.compute_flux = Kernel(self._make_flux(impl_op), muf, gradf, fpts)
+            self.compute_flux = Kernel(*self._make_flux(impl_op), muf, gradf, fpts)
 
     def _make_delu(self):
         nvars, ndims = self.nvars, self.ndims
-        lt, le, lf = self._lidx
-        nf = self._vec_snorm
+        lidx = self.lidx
+        nf = self.vec_snorm
         ydist = self.ydist
 
         # Compile functions
@@ -544,12 +548,12 @@ class RANSBCInters(BaseAdvecDiffBCInters):
 
         bc = self.bc
 
-        def compute_delu(i_begin, i_end, uf):
+        def compute_delu(i_begin, i_end, lidx, nf, ydist, uf):
             for idx in range(i_begin, i_end):
-                ur = array((nvars,))
+                ur = array((nvars,), np.float64)
                 nfi = nf[:, idx]
 
-                lti, lfi, lei = lt[idx], lf[idx], le[idx]
+                lti, lei, lfi = lidx[:, idx]
 
                 ul = uf[lti][lfi, :, lei]
                 
@@ -560,13 +564,13 @@ class RANSBCInters(BaseAdvecDiffBCInters):
                     du = ur[jdx] - ul[jdx]
                     uf[lti][lfi, jdx, lei] = du
 
-        return self.be.make_loop(self.nfpts, compute_delu)
+        return self.be.make_loop(self.nfpts, compute_delu, lidx, nf, ydist)
         
     def _make_flux(self, impl_op):
         ndims, nvars, nfvars = self.ndims, self.nvars, self.nfvars
 
-        lt, le, lf = self._lidx
-        nf, sf = self._vec_snorm, self._mag_snorm
+        lidx = self.lidx
+        nf, sf = self.vec_snorm, self.mag_snorm
         ydist = self.ydist
 
         # Compiler arguments
@@ -597,17 +601,17 @@ class RANSBCInters(BaseAdvecDiffBCInters):
 
         if impl_op == 'spectral-radius':
             # reciprocal of distance between two cells
-            rcp_dx = self._rcp_dx
+            rcp_dx = self.rcp_dx
 
             # Get wave speed function
             wave_speed = self.ele0.make_wave_speed()
             twave_speed = self.ele0.make_turb_wave_speed()
 
-            def comm_flux_spr(i_begin, i_end, muf, gradf, uf, lam, tlam):
+            def comm_flux_spr(i_begin, i_end, lidx, nf, sf, rcp_dx, ydist, muf, gradf, uf, lam, tlam):
                 for idx in range(i_begin, i_end):
-                    fn = array((nvars,))
-                    um = array((nvars,))
-                    ur = array((nvars,))
+                    fn = array((nvars,), np.float64)
+                    um = array((nvars,), np.float64)
+                    ur = array((nvars,), np.float64)
 
                     # Normal vector and wall distance (ydns)
                     nfi = nf[:, idx]
@@ -615,7 +619,7 @@ class RANSBCInters(BaseAdvecDiffBCInters):
                     rcp_dxi = rcp_dx[idx]
 
                     # Left solutions
-                    lti, lfi, lei = lt[idx], lf[idx], le[idx]
+                    lti, lei, lfi = lidx[:, idx]
                     ul = uf[lti][lfi, :, lei]
 
                     # Gradient at face
@@ -654,7 +658,7 @@ class RANSBCInters(BaseAdvecDiffBCInters):
                         # Save it at left solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux_spr)
+            return self.be.make_loop(self.nfpts, comm_flux_spr, lidx, nf, sf, rcp_dx, ydist)
         elif impl_op == 'approx-jacobian':
             from pybaram.solvers.euler.jacobian import make_convective_jacobian
             from pybaram.solvers.navierstokes.jacobian import get_viscous_jacobian
@@ -662,7 +666,7 @@ class RANSBCInters(BaseAdvecDiffBCInters):
             ntvars = nvars - nfvars
 
             # reciprocal of distance between two cells
-            rcp_dx = self._rcp_dx
+            rcp_dx = self.rcp_dx
 
             # Get viscous Jacobian type
             vistype = self.cfg.get('solver-time-integrator', 'visflux-jacobian', 'tlns')
@@ -672,14 +676,14 @@ class RANSBCInters(BaseAdvecDiffBCInters):
             vis_jacobian = get_viscous_jacobian(vistype, self.be, cplargs)
             turb_jacobian = self.ele0.make_turb_jacobian()
 
-            def comm_flux_ajac(i_begin, i_end, muf, gradf, uf, jmats, tjmats):
+            def comm_flux_ajac(i_begin, i_end, lidx, nf, sf, rcp_dx, ydist, muf, gradf, uf, jmats, tjmats):
                 for idx in range(i_begin, i_end):
-                    fn = array((nvars,))
-                    um = array((nvars,))
-                    ur = array((nvars,))
+                    fn = array((nvars,), np.float64)
+                    um = array((nvars,), np.float64)
+                    ur = array((nvars,), np.float64)
 
-                    ap = array((nfvars, nfvars))
-                    at = array((ntvars, ntvars))
+                    ap = array((nfvars, nfvars), np.float64)
+                    at = array((ntvars, ntvars), np.float64)
 
                     # Normal vector and wall distance (ydns)
                     nfi = nf[:, idx]
@@ -687,7 +691,7 @@ class RANSBCInters(BaseAdvecDiffBCInters):
                     rcp_dxi = rcp_dx[idx]
 
                     # Left solutions
-                    lti, lfi, lei = lt[idx], lf[idx], le[idx]
+                    lti, lei, lfi = lidx[:, idx]
                     ul = uf[lti][lfi, :, lei]
 
                     # Gradient at face
@@ -732,20 +736,20 @@ class RANSBCInters(BaseAdvecDiffBCInters):
                         # Save it at left solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux_ajac)
+            return self.be.make_loop(self.nfpts, comm_flux_ajac, lidx, nf, sf, rcp_dx, ydist)
         else:
-            def comm_flux(i_begin, i_end, muf, gradf, uf):
+            def comm_flux(i_begin, i_end, lidx, nf, sf, ydist, muf, gradf, uf):
                 for idx in range(i_begin, i_end):
-                    fn = array((nvars,))
-                    um = array((nvars,))
-                    ur = array((nvars,))
+                    fn = array((nvars,), np.float64)
+                    um = array((nvars,), np.float64)
+                    ur = array((nvars,), np.float64)
 
                     # Normal vector and wall distance (ydns)
                     nfi = nf[:, idx]
                     ydnsi = ydist[idx]
 
                     # Left solutions
-                    lti, lfi, lei = lt[idx], lf[idx], le[idx]
+                    lti, lei, lfi = lidx[:, idx]
                     ul = uf[lti][lfi, :, lei]
 
                     # Gradient at face
@@ -776,7 +780,7 @@ class RANSBCInters(BaseAdvecDiffBCInters):
                         # Save it at left solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux)
+            return self.be.make_loop(self.nfpts, comm_flux, lidx, nf, sf, ydist)
 
 
 class RANSSlipWallBCInters(RANSBCInters):

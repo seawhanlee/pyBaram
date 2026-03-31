@@ -22,8 +22,8 @@ class RANSSAInters(BaseInters):
 
         def tflux(ul, ur, um, gf, nf, ydist, mu, mut, fn):
             # Convective flux
-            contral = dot(ul, nf, ndims, 1)/ul[0]
-            contrar = dot(ur, nf, ndims, 1)/ur[0]
+            contral = dot(ul, nf, ndims, 1, 0)/ul[0]
+            contrar = dot(ur, nf, ndims, 1, 0)/ur[0]
             contram = 0.5*(contral + contrar)
 
             contrap = 0.5*(contram + abs(contram))
@@ -35,7 +35,7 @@ class RANSSAInters(BaseInters):
             nu = 2*mu / (ul[0] + ur[0])
             nut = 0.5*(ul[nvars-1] + ur[nvars-1])
 
-            tau = dot(gf[:, nvars-1], nf, ndims)
+            tau = dot(gf[:, nvars-1], nf, ndims, 0, 0)
 
             fn[nvars-1] -= 1/sigma*(nu + nut)*tau
 

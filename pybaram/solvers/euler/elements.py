@@ -48,7 +48,7 @@ class FluidElements:
             # Compute normal component of flux
             rho, et = u[0], u[nfvars-1]
 
-            contrav = dot(u, nf, ndims, 1)/rho
+            contrav = dot(u, nf, ndims, 1, 0)/rho
 
             p = (gamma - 1)*(et - 0.5*dot(u, u, ndims, 1, 1)/rho)
             if p < pmin:
@@ -127,14 +127,14 @@ class EulerElements(BaseAdvecElements, FluidElements):
 
         if impl_op == 'spectral-radius':
             # Spectral radius on face
-            self.fspr = np.empty((self.nface, self.neles))
+            self.fspr = self.be.alloc_array((self.nface, self.neles))
         elif impl_op == 'approx-jacobian':
             # Jacobian matrix on face
-            self.jmat = np.empty((2, self.nfvars, self.nfvars, \
-                                  self.nface, self.neles))
+            self.jmat = self.be.alloc_array((2, self.nfvars, self.nfvars, \
+                                             self.nface, self.neles))
 
         # Kernel to compute timestep
-        self.timestep = Kernel(self._make_timestep(),
+        self.timestep = Kernel(*self._make_timestep(),
                                self.upts_in, self.dt)
 
     def _make_timestep(self):
@@ -142,13 +142,15 @@ class EulerElements(BaseAdvecElements, FluidElements):
         ndims, nface = self.ndims, self.nface
 
         # Static variables
-        vol = self._vol
-        smag, svec = self._gen_snorm_fpts()
+        vol = self.vol
+        _smag, _svec = self._gen_snorm_fpts()
+        smag = self.be.convert_array(_smag)
+        svec = self.be.convert_array(_svec)
 
         # Constants
         gamma, pmin = self._const['gamma'], self._const['pmin']
 
-        def timestep(i_begin, i_end, u, dt, cfl):
+        def timestep(i_begin, i_end, smag, svec, vol, u, dt, cfl):
             for idx in range(i_begin, i_end):
                 rho = u[0, idx]
                 et = u[-1, idx]
@@ -160,23 +162,23 @@ class EulerElements(BaseAdvecElements, FluidElements):
                 # Sum of Wave speed * surface area
                 sum_lamdf = 0.0
                 for jdx in range(nface):
-                    lamdf = abs(dot(u[:, idx], svec[jdx, idx], ndims, 1))/rho + c
+                    lamdf = abs(dot(u[:, idx], svec[jdx, idx], ndims, 1, 0))/rho + c
                     sum_lamdf += lamdf*smag[jdx, idx]
 
                 # Time step : CFL * vol / sum(lambda_f S_f)
                 dt[idx] = cfl*vol[idx] / sum_lamdf
 
-        return self.be.make_loop(self.neles, timestep)
+        return self.be.make_loop(self.neles, timestep, smag, svec, vol)
 
     def make_wave_speed(self):
         # Dimensions and constants
         ndims, nfvars = self.ndims, self.nfvars
         gamma, pmin = self._const['gamma'], self._const['pmin']
 
-        def _lambdaf(u, nf, *args):
+        def _lambdaf(u, nf):
             rho, et = u[0], u[nfvars-1]
 
-            contra = dot(u, nf, ndims, 1)/rho
+            contra = dot(u, nf, ndims, 1, 0)/rho
             p = max((gamma - 1)*(et - 0.5*dot(u, u, ndims, 1, 1)/rho), pmin)
             c = np.sqrt(gamma*p/rho)
 

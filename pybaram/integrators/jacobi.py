@@ -8,7 +8,7 @@ def make_jacobi_update(ele):
     nvars = ele.nvars
 
     # Update next time step solution
-    def _update(i_begin, i_end, uptsb, dub, subres):
+    def _update(i_begin, i_end, uptsb, dub, dubp1):
         for idx in range(i_begin, i_end):
             for kdx in range(nvars):
                 # Update solution by adding residual
@@ -17,8 +17,8 @@ def make_jacobi_update(ele):
                 # Initialize dub array
                 dub[kdx, idx] = 0.0
             
-            # Initialize subres array
-            subres[idx] = 0.0
+            # Initialize dubp1 array
+            dubp1[idx] = 0.0
 
     return _update
 
@@ -28,10 +28,7 @@ def make_pre_jacobi(be, ele, nv, factor=1.0):
     nface = ele.nface
 
     # Number of variables
-    dnv = nv[1] - nv[0]
-
-    # Normal vectors at faces
-    fnorm_vol = ele.mag_fnorm * ele.rcp_vol
+    dnv = int(nv[1] - nv[0])
 
     # LU decomposition function
     dcmp_func = make_lu_dcmp(be, dnv)
@@ -39,11 +36,11 @@ def make_pre_jacobi(be, ele, nv, factor=1.0):
     # Temporal array
     array = be.local()
 
-    def _pre_diag(i_begin, i_end, dt, diag, fjmat):
+    def _pre_diag(i_begin, i_end, fnorm_vol, dt, diag, fjmat):
         # Compute diagonal matrix
         for idx in range(i_begin, i_end):
             # Temporal diagonal matrix
-            dmat = array((dnv, dnv))
+            dmat = array((dnv, dnv), np.float64)
 
             # Initialize
             for row in range(dnv):
@@ -77,19 +74,16 @@ def make_tpre_jacobi(be, ele, nv, dsrcf, factor):
     nface = ele.nface
 
     # Number of variables
-    dnv = nv[1] - nv[0]
-
-    # Normal vectors at faces
-    fnorm_vol = ele.mag_fnorm * ele.rcp_vol
+    dnv = int(nv[1] - nv[0])
 
     # Local matrix function
     array = be.local()
     
-    def _pre_tdiag(i_begin, i_end, uptsb, dt, tdiag, tfjmat, dsrc):
+    def _pre_tdiag(i_begin, i_end, fnorm_vol, uptsb, dt, tdiag, tfjmat, dsrc):
         # Compute digonal matrix
         for idx in range(i_begin, i_end):
             # Allocate temporal turbulent diagonal matrix
-            tmat = array((dnv, dnv))
+            tmat = array((dnv, dnv), np.float64)
 
             # Initialize
             for row in range(dnv):
@@ -127,25 +121,20 @@ def make_jacobi_sweep(be, ele, nv):
 
     # Get element attributes
     nface = ele.nface
-    dnv = nv[1] - nv[0]
-
-    # Get index array for neihboring cells
-    nei_ele = ele.nei_ele
-
-    # Normal vectors at faces
-    fnorm_vol= ele.mag_fnorm * ele.rcp_vol
+    dnv = int(nv[1] - nv[0])
+    nv0 = nv[0]
 
     # Forward/Backward substitution function
     sub_func = make_substitution(be, dnv)
 
-    def _jacobi_sweep(i_begin, i_end, rhsb, dub, rod, fjmat):
+    def _jacobi_sweep(i_begin, i_end, fnorm_vol, nei_ele, rhsb, dub, rod, fjmat):
         # Compute R-(L+U)x
         for idx in range(i_begin, i_end):
-            rhs = array((dnv,))
+            rhs = array((dnv,), np.float64)
 
             # Initialize rhs array with RHS
             for kdx in range(dnv):
-                rhs[kdx] = rhsb[kdx+nv[0], idx]
+                rhs[kdx] = rhsb[kdx+nv0, idx]
 
             # Computes Jacobian matrix based on neighbor cells
             for jdx in range(nface):
@@ -156,17 +145,17 @@ def make_jacobi_sweep(be, ele, nv):
                     neimat = fjmat[1, :, :, jdx, idx]
 
                     for kdx in range(dnv):
-                        rhs[kdx] -= dot(neimat[kdx, :], dub[:, neib], dnv, 0, nv[0]) * fv
+                        rhs[kdx] -= dot(neimat[kdx, :], dub[:, neib], dnv, 0, nv0) * fv
 
             # Allocates to each rod array
             for kdx in range(dnv):
-                rod[kdx+nv[0], idx] = rhs[kdx]
+                rod[kdx+nv0, idx] = rhs[kdx]
         
-    def _jacobi_compute(i_begin, i_end, dub, rod, diag):
+    def _jacobi_compute(i_begin, i_end, diag, dub, rod):
         # Compute Ax = b
         for idx in range(i_begin, i_end):
-            rhs = array((dnv,))
-            dmat = array((dnv, dnv))
+            rhs = array((dnv,), np.float64)
+            dmat = array((dnv, dnv), np.float64)
 
             for row in range(dnv):
                 for col in range(dnv):
@@ -174,14 +163,23 @@ def make_jacobi_sweep(be, ele, nv):
 
             # Reallocate rod element value to rhs array
             for kdx in range(dnv):
-                rhs[kdx] = rod[kdx+nv[0], idx]
+                rhs[kdx] = rod[kdx+nv0, idx]
             
             sub_func(dmat, rhs)
             
             # Inner-update dub array
             for kdx in range(dnv):
-                dub[kdx+nv[0], idx] = rhs[kdx]
+                dub[kdx+nv0, idx] = rhs[kdx]
 
     return _jacobi_sweep, _jacobi_compute
 
 
+def make_diff_solution(res_idx):
+
+    def _run(i_begin, i_end, dub, dubp1, subres):
+        for idx in range(i_begin, i_end):
+            tmp = dubp1[idx] - dub[res_idx, idx]
+            subres[idx] = tmp * tmp
+            dubp1[idx] = dub[res_idx, idx]
+    
+    return _run

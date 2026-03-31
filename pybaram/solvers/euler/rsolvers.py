@@ -23,7 +23,7 @@ def make_rusanov(cplargs):
     array = cplargs['array']
 
     def rsolver(ul, ur, nf, fn):
-        fl, fr = array((nvars,)), array((nvars,))
+        fl, fr = array((nvars,), np.float64), array((nvars,), np.float64)
         
         pl, contravl = flux(ul, nf, fl)
         pr, contravr = flux(ur, nf, fr)
@@ -43,11 +43,11 @@ def make_roe(cplargs):
     array = cplargs['array']
 
     def rsolver(ul, ur, nf, fn):
-        fl, fr = array((nvars,)), array((nvars,))
-        vl, vr = array((ndims,)), array((ndims,))
-        dv, va = array((ndims,)), array((ndims,))
+        fl, fr = array((nvars,), np.float64), array((nvars,), np.float64)
+        vl, vr = array((ndims,), np.float64), array((ndims,), np.float64)
+        dv, va = array((ndims,), np.float64), array((ndims,), np.float64)
         #ev1, ev2, ev3 = array((nvars,)), array((nvars,)), array((nvars,))
-        ev = array((3, nvars))
+        ev = array((3, nvars), np.float64)
 
         pl, contravl = flux(ul, nf, fl)
         pr, contravr = flux(ur, nf, fr)
@@ -77,9 +77,9 @@ def make_roe(cplargs):
         for jdx in range(ndims):
             va[jdx] = vl[jdx]*ratl + vr[jdx]*ratr
 
-        contrava = dot(va, nf, ndims)
+        contrava = dot(va, nf, ndims, 0, 0)
 
-        qq = 0.5*dot(va, va, ndims)
+        qq = 0.5*dot(va, va, ndims, 0, 0)
         aasq = (gamma - 1)*(ha - qq)
         aa = np.sqrt(aasq)
         inv_aasq = 1/aasq
@@ -104,7 +104,7 @@ def make_roe(cplargs):
         ev[0, nvars-1] = alp1*(ha - aa*contrava)
 
         ev[1, 0] = alp2
-        ev[1, nvars-1] = alp2*qq + ra*(dot(va, dv, ndims) - contrava*dcontrav)
+        ev[1, nvars-1] = alp2*qq + ra*(dot(va, dv, ndims, 0, 0) - contrava*dcontrav)
 
         ev[2, 0] = alp3
         ev[2, nvars-1] = alp3*(ha + aa*contrava)
@@ -126,10 +126,10 @@ def make_roem(cplargs):
     array = cplargs['array']
 
     def rsolver(ul, ur, nf, fn):
-        fl, fr = array((nvars,)), array((nvars,))
-        vl, vr = array((ndims,)), array((ndims,))
-        dv, va = array((ndims,)), array((ndims,))
-        du, bdq = array((nvars,)), array((nvars,))
+        fl, fr = array((nvars,), np.float64), array((nvars,), np.float64)
+        vl, vr = array((ndims,), np.float64), array((ndims,), np.float64)
+        dv, va = array((ndims,), np.float64), array((ndims,), np.float64)
+        du, bdq = array((nvars,), np.float64), array((nvars,), np.float64)
 
         pl, contravl = flux(ul, nf, fl)
         pr, contravr = flux(ur, nf, fr)
@@ -160,9 +160,9 @@ def make_roem(cplargs):
         for jdx in range(ndims):
             va[jdx] = vl[jdx]*ratl + vr[jdx]*ratr
 
-        contrava = dot(va, nf, ndims)
+        contrava = dot(va, nf, ndims, 0, 0)
 
-        aa = np.sqrt((gamma - 1)*(ha - 0.5*dot(va, va, ndims)))
+        aa = np.sqrt((gamma - 1)*(ha - 0.5*dot(va, va, ndims, 0, 0)))
         rcp_aa = 1/aa
 
         # Compute |M|, add a small number to avoid a possible singularity of f
@@ -211,11 +211,11 @@ def make_rotated_roem(cplargs):
     array = cplargs['array']
 
     def rsolver(ul, ur, nf, fn):
-        fl, fr = array((nvars,)), array((nvars,))
-        vl, vr = array((ndims,)), array((ndims,))
-        dv, va = array((ndims,)), array((ndims,))
-        du, bdq = array((nvars,)), array((nvars,))
-        nv = array((ndims,))
+        fl, fr = array((nvars,), np.float64), array((nvars,), np.float64)
+        vl, vr = array((ndims,), np.float64), array((ndims,), np.float64)
+        dv, va = array((ndims,), np.float64), array((ndims,), np.float64)
+        du, bdq = array((nvars,), np.float64), array((nvars,), np.float64)
+        nv = array((ndims,), np.float64)
 
         pl, contravl = flux(ul, nf, fl)
         pr, contravr = flux(ur, nf, fr)
@@ -245,9 +245,9 @@ def make_rotated_roem(cplargs):
         for jdx in range(ndims):
             va[jdx] = vl[jdx]*ratl + vr[jdx]*ratr
 
-        contrava = dot(va, nf, ndims)
+        contrava = dot(va, nf, ndims, 0, 0)
 
-        aa = np.sqrt((gamma - 1)*(ha - 0.5*dot(va, va, ndims)))
+        aa = np.sqrt((gamma - 1)*(ha - 0.5*dot(va, va, ndims, 0, 0)))
         rcp_aa = 1/aa
 
         # Eigen structure
@@ -262,7 +262,7 @@ def make_rotated_roem(cplargs):
         b1b2 = b1b2*rcp_b1_b2
 
         # Rotated direction       
-        mag_dv = np.sqrt(dot(dv, dv, ndims))
+        mag_dv = np.sqrt(dot(dv, dv, ndims, 0, 0))
         if mag_dv < 1e-6:
             # For very small dv
             for jdx in range(ndims):
@@ -288,12 +288,12 @@ def make_rotated_roem(cplargs):
                 nv[jdx] /= mag_nv
 
         # Directional Cosine
-        alp = dot(nv, nf, ndims)
+        alp = dot(nv, nf, ndims, 0, 0)
 
         # Rotated Contact wave terms
-        contravav = dot(va, nv, ndims)
-        contravlv = dot(vl, nv, ndims)
-        contravrv = dot(vr, nv, ndims)
+        contravav = dot(va, nv, ndims, 0, 0)
+        contravlv = dot(vl, nv, ndims, 0, 0)
+        contravrv = dot(vr, nv, ndims, 0, 0)
         dcontrav = contravrv - contravlv
 
         b1v = max(0.0, max(contravav + aa, contravrv + aa))
@@ -329,9 +329,9 @@ def make_hlle(cplargs):
     array = cplargs['array']
 
     def rsolver(ul, ur, nf, fn):
-        fl, fr = array((nvars,)), array((nvars,))
-        vl, vr = array((ndims,)), array((ndims,))
-        va = array((ndims,))
+        fl, fr = array((nvars,), np.float64), array((nvars,), np.float64)
+        vl, vr = array((ndims,), np.float64), array((ndims,), np.float64)
+        va = array((ndims,), np.float64)
 
         pl, contravl = flux(ul, nf, fl)
         pr, contravr = flux(ur, nf, fr)
@@ -353,8 +353,8 @@ def make_hlle(cplargs):
         for jdx in range(ndims):
             va[jdx] = vl[jdx]*ratl + vr[jdx]*ratr
 
-        contrava = dot(va, nf, ndims)
-        aa = np.sqrt((gamma - 1)*(ha - 0.5*dot(va, va, ndims)))
+        contrava = dot(va, nf, ndims, 0, 0)
+        aa = np.sqrt((gamma - 1)*(ha - 0.5*dot(va, va, ndims, 0, 0)))
 
         # Eigen structure
         b1 = max(0.0, max(contrava + aa, contravr + aa))
@@ -380,10 +380,10 @@ def make_hllem(cplargs):
     array = cplargs['array']
 
     def rsolver(ul, ur, nf, fn):
-        fl, fr = array((nvars,)), array((nvars,))
-        vl, vr = array((ndims,)), array((ndims,))
-        dv, va = array((ndims,)), array((ndims,))
-        df = array((ndims,))
+        fl, fr = array((nvars,), np.float64), array((nvars,), np.float64)
+        vl, vr = array((ndims,), np.float64), array((ndims,), np.float64)
+        dv, va = array((ndims,), np.float64), array((ndims,), np.float64)
+        df = array((ndims,), np.float64)
 
         pl, contravl = flux(ul, nf, fl)
         pr, contravr = flux(ur, nf, fr)
@@ -406,9 +406,9 @@ def make_hllem(cplargs):
         for jdx in range(ndims):
             va[jdx] = vl[jdx]*ratl + vr[jdx]*ratr
 
-        qq = dot(va, va, ndims)
-        contrava = dot(va, nf, ndims)
-        aa = np.sqrt((gamma - 1)*(ha - 0.5*dot(va, va, ndims)))
+        qq = dot(va, va, ndims, 0, 0)
+        contrava = dot(va, nf, ndims, 0, 0)
+        aa = np.sqrt((gamma - 1)*(ha - 0.5*dot(va, va, ndims, 0, 0)))
 
         # Eigen structure
         b1 = max(0.0, max(contrava + aa, contravr + aa))
@@ -436,7 +436,7 @@ def make_hllem(cplargs):
         alp2 = ra
         for jdx in range(ndims):
             df[jdx+1] += alp2*(dv[jdx] - nf[jdx]*dcontra)
-        df[nvars-1] += alp2*(dot(va, dv, ndims) - contrava*dcontra)
+        df[nvars-1] += alp2*(dot(va, dv, ndims, 0, 0) - contrava*dcontra)
 
         #  Normalized wave speed
         b1b2 = b1*b2
@@ -460,7 +460,7 @@ def make_ausmpwp(cplargs):
     alpha = 3/16
 
     def rsolver(ul, ur, nf, fn):
-        vl, vr = array((ndims,)), array((ndims,))
+        vl, vr = array((ndims,), np.float64), array((ndims,), np.float64)
         pl = to_primevars(ul, vl)
         pr = to_primevars(ur, vr)
 
@@ -468,10 +468,10 @@ def make_ausmpwp(cplargs):
         hl = (ul[nvars-1] + pl)/ul[0]
         hr = (ur[nvars-1] + pr)/ur[0]
 
-        contral = dot(vl, nf, ndims)
-        contrar = dot(vr, nf, ndims)
-        vl2 = dot(vl, vl, ndims) - contral**2
-        vr2 = dot(vr, vr, ndims) - contrar**2
+        contral = dot(vl, nf, ndims, 0, 0)
+        contrar = dot(vr, nf, ndims, 0, 0)
+        vl2 = dot(vl, vl, ndims, 0, 0) - contral**2
+        vr2 = dot(vr, vr, ndims, 0, 0) - contrar**2
 
         conmid = 0.5*(contral + contrar)
 
@@ -553,7 +553,7 @@ def make_ausmpup(cplargs):
     kp, ku = 1, 1
 
     def rsolver(ul, ur, nf, fn):
-        vl, vr = array((ndims,)), array((ndims,))
+        vl, vr = array((ndims,), np.float64), array((ndims,), np.float64)
         pl = to_primevars(ul, vl)
         pr = to_primevars(ur, vr)
 
@@ -561,8 +561,8 @@ def make_ausmpup(cplargs):
         hl = (ul[nvars-1] + pl)/ul[0]
         hr = (ur[nvars-1] + pr)/ur[0]
 
-        contral = dot(vl, nf, ndims)
-        contrar = dot(vr, nf, ndims)
+        contral = dot(vl, nf, ndims, 0, 0)
+        contrar = dot(vr, nf, ndims, 0, 0)
 
         # Critical speed of sound
         csl2 = 2.0*(gamma - 1)/(gamma + 1)*hl

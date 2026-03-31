@@ -34,12 +34,12 @@ def make_convective_jacobian(be, cplargs, sign):
         # Computes primitive variables
         # from conservative variables.
         rho = uf[0]
-        v = array((ndims,))
+        v = array((ndims,), np.float64)
         p = to_prim(uf, v)
         e = uf[ndims+1]/rho
 
-        cv = dot(v, nf, ndims)
-        v2 = dot(v, v, ndims)
+        cv = dot(v, nf, ndims, 0, 0)
+        v2 = dot(v, v, ndims, 0, 0)
         cc = np.sqrt(gamma*p/rho)
         M = cv/cc
 
@@ -54,7 +54,7 @@ def make_convective_jacobian(be, cplargs, sign):
                     ap[i, j] = 0.0
         else:
             # Computes Van Leer FVS Jacobian
-            f2 = array((ndims,))
+            f2 = array((ndims,), np.float64)
             rc = rho*cc
             gr = gamma*rho
 
@@ -106,13 +106,13 @@ def make_convective_jacobian(be, cplargs, sign):
 
         # Computes primitive variables
         # from conservative variables.
-        v = array((ndims,))
+        v = array((ndims,), np.float64)
         rho = uf[0]
         p = to_prim(uf, v)
         e = uf[ndims+1]/rho
 
-        cv = dot(v, nf, ndims)
-        v2 = dot(v, v, ndims)
+        cv = dot(v, nf, ndims, 0, 0)
+        v2 = dot(v, v, ndims, 0, 0)
         cc = np.sqrt(gamma*p/rho)
         M = cv/cc
 
@@ -127,7 +127,7 @@ def make_convective_jacobian(be, cplargs, sign):
             _inviscid(uf, nf, am)
         else:
             # Computes Van Leer FVS Jacobian
-            f2 = array((ndims,))
+            f2 = array((ndims,), np.float64)
             rc = rho*cc
             gr = gamma*rho
 
@@ -197,11 +197,11 @@ def make_inviscid_jacobian(be, cplargs):
         # Computes primitive variables
         # from convservative variables.
         rho = uf[0]
-        v = array((ndims,))
+        v = array((ndims,), np.float64)
         p = to_prim(uf, v)
         c = np.sqrt(gamma*p/rho)
-        q2 = dot(v, v, ndims)
-        qn = dot(v, nf, ndims)
+        q2 = dot(v, v, ndims, 0, 0)
+        qn = dot(v, nf, ndims, 0, 0)
         H = c**2 / gam1 + 0.5 * q2
 
         # Computes each Jacobian matrix element.

@@ -84,7 +84,13 @@ class BaseAdvecSystem(BaseSystem):
 
         if is_norm:
             # Compute residual if requested
-            resid = sum(self.eles.compute_resid())
+            self.eles.compute_resid()
+            self.eles.reduce_resid()
+
+            # Wait for the mapped memory reduction
+            self.be.wait()
+            resid = sum(self.eles.h_resid)
+            
             return resid
         else:
             return 'none'
@@ -120,3 +126,6 @@ class BaseAdvecSystem(BaseSystem):
         # Post-process
         self.eles.upts_in.idx = idx_in
         self.eles.post()
+
+    def sum_reduce(a, b):
+        return a + b

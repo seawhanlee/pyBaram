@@ -16,9 +16,9 @@ def get_bc(self, be, name, bcargs):
     else:
         tbc = be.compile(make_turb_bc_ext(bcargs))
 
-    def bc(ul, ur, nf, *args):
+    def bc(ul, ur, nf, mu, d1):
         cbc(ul, ur, nf)
-        tbc(ul, ur, nf, *args)
+        tbc(ul, ur, nf, mu, d1)
 
     return be.compile(bc)
 
@@ -26,7 +26,7 @@ def get_bc(self, be, name, bcargs):
 def make_turb_bc_wall(bcargs):
     nvars = bcargs['nvars']
 
-    def bc(ul, ur, *args):
+    def bc(ul, ur, nf, mu, d1):
         ur[nvars-1] = -ul[nvars-1]
 
     return bc
@@ -35,7 +35,7 @@ def make_turb_bc_wall(bcargs):
 def make_turb_bc_ext(bcargs):
     nvars = bcargs['nvars']
 
-    def bc(ul, ur, *args):
+    def bc(ul, ur, nf, mu, d1):
         ur[nvars-1] = ul[nvars-1]
 
     return bc
@@ -45,7 +45,7 @@ def make_turb_bc_far(bcargs):
     nvars = bcargs['nvars']
     nut = bcargs['nut']
 
-    def bc(ul, ur, *args):
+    def bc(ul, ur, nf, mu, d1):
         ur[nvars-1] = nut
 
     return bc

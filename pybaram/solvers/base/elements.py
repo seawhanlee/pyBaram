@@ -133,6 +133,12 @@ class BaseElements:
     def _vol(self):
         # Volume of element
         return np.abs(self.geom.vol(self.eles))
+    
+    @property
+    @fc.lru_cache()
+    def vol(self):
+        # Volume of element in `backend` format
+        return self.be.convert_array(self._vol)
 
     @property
     @fc.lru_cache()
@@ -275,3 +281,8 @@ class BaseElements:
     def dxv(self):
         # Displacement vector of vertex from cell center
         return self.geom.dxv(self.eles).swapaxes(1, 2)
+
+    @property
+    @fc.lru_cache()
+    def fnorm_vol(self):
+        return self.mag_fnorm * self.rcp_vol

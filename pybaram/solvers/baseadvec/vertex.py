@@ -15,7 +15,7 @@ class BaseAdvecVertex(BaseVertex):
         else:
             if not hasattr(self, 'vpts'):
                 # Allocate array to compute extremes at vertex
-                self.vpts = np.empty((2, self.nvars, self.nvtx))
+                self.vpts = self.be.alloc_array((2, self.nvars, self.nvtx))
 
         return self.vpts
 
@@ -26,7 +26,8 @@ class BaseAdvecVertex(BaseVertex):
         if order > 1 and limiter != 'none':
             # Kernel to compute exterems at vertex
             upts_in = tuple(ele.upts_in for ele in elemap.values())
-            self.compute_extv = Kernel(self._make_extv(), self.vpts, upts_in)
+            self.nele = len(upts_in)
+            self.compute_extv = Kernel(*self._make_extv(), self.vpts, upts_in)
 
             if self._neivtx:
                 # Construct kernels for MPI communication at vertex
@@ -39,11 +40,13 @@ class BaseAdvecVertex(BaseVertex):
             self.mpi = False
 
     def _make_extv(self):
-        ivtx = self._ivtx
-        t, e, _ = self._idx
+        ivtx = self.be.convert_array(self._ivtx)
+        # t, e, _ = self._idx
+        t = self.be.convert_array(self._idx[0])
+        e = self.be.convert_array(self._idx[1])
         nvars = self.nvars
 
-        def cal_extv(i_begin, i_end, vext, upts):
+        def cal_extv(i_begin, i_end, ivtx, t, e, vext, upts):
             for i in range(i_begin, i_end):
                 for idx in range(ivtx[i], ivtx[i+1]):
                     ti, ei = t[idx], e[idx]
@@ -58,7 +61,7 @@ class BaseAdvecVertex(BaseVertex):
                             vext[1, jdx, i] = min(
                                 vext[1, jdx, i], upts[ti][jdx, ei])
 
-        return self.be.make_loop(self.nvtx, cal_extv)
+        return self.be.make_loop(self.nvtx, cal_extv, ivtx, t, e)
 
     def _construct_neighbors(self, neivtx):
         from mpi4py import MPI
@@ -70,6 +73,7 @@ class BaseAdvecVertex(BaseVertex):
         nvars = self.nvars
         for p, v in neivtx.items():
             # Make buffer
+            # TODO : Heterogeneous computing
             n = len(v)
             sbuf = np.empty((2, nvars, n), dtype=np.float64)
             rbuf = np.empty((2, nvars, n), dtype=np.float64)
@@ -95,9 +99,9 @@ class BaseAdvecVertex(BaseVertex):
         self.recv = _communicate(rreqs)
 
         # Pack and unpack vertex value before and after communication
-        self.pack = lambda: [pack(self.vpts, buf)
+        self.pack = lambda: [pack[0](self.vpts, buf)
                              for pack, buf in zip(packs, sbufs)]
-        self.unpack = lambda: [unpack(self.vpts, buf)
+        self.unpack = lambda: [unpack[0](self.vpts, buf)
                                for unpack, buf in zip(unpacks, rbufs)]
 
         self.rbufs = ProxyList(rbufs)

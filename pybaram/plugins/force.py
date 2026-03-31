@@ -12,6 +12,7 @@ class ForcePlugin(BasePlugin):
     name = 'force'
 
     def __init__(self, intg, cfg, suffix):
+        super().__init__(intg, cfg, suffix)
         self.cfg = cfg
         sect = 'soln-plugin-{}-{}'.format(self.name, suffix)
 
@@ -66,8 +67,8 @@ class ForcePlugin(BasePlugin):
         if suffix in bcmap:
             # Get normal vector, moment arm and element index for bc
             bc = bcmap[suffix]
-            t, e, _ = bc._lidx
-            mag, vec = bc._mag_snorm, bc._vec_snorm
+            t, e, _ = bc.rawlidx
+            mag, vec = bc.raw_mag_snorm, bc.raw_vec_snorm
             xf = bc.xf - xc[:,None]
 
             for i in np.unique(t):

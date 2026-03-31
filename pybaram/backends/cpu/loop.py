@@ -5,7 +5,7 @@ import numba as nb
 import math
             
             
-def make_serial_loop1d(ne, func, n0=0, debug=False, src='none'):
+def make_serial_loop1d(ne, func, *carrs, n0=0, debug=False, src='none', **kwargs):
     # Compile function
     if debug:
         # Don't JIT compile if debug mode
@@ -18,10 +18,10 @@ def make_serial_loop1d(ne, func, n0=0, debug=False, src='none'):
         def kern(*args):
             _func(n0, ne, *args)
 
-        return kern
+        return kern, *carrs
     
 
-def make_parallel_loop1d(ne, func, n0=0, src='none'):
+def make_parallel_loop1d(ne, func, *carrs, n0=0, src='none', **kwargs):
     # Parser to enable parallel loop
     ftxt, gvars, name = parse_loop(func, src, parallel='cpu')
 
@@ -37,5 +37,5 @@ def make_parallel_loop1d(ne, func, n0=0, src='none'):
     def kern(*args):
         _func(n0, ne, *args)
 
-    return kern
+    return kern, *carrs
 

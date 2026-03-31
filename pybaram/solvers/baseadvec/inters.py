@@ -14,19 +14,17 @@ class BaseAdvecIntInters(BaseIntInters):
 
         if self.order > 1:
             # Kernel to compute differnce of solution at face
-            self.compute_delu = Kernel(self._make_delu(), fpts)
+            self.compute_delu = Kernel(*self._make_delu(), fpts)
         else:
             self.compute_delu = NullKernel
 
     def _make_delu(self):
         nvars = self.nvars
-        lt, le, lf = self._lidx
-        rt, re, rf = self._ridx
 
-        def compute_delu(i_begin, i_end, uf):
+        def compute_delu(i_begin, i_end, lidx, ridx, uf):
             for idx in range(i_begin, i_end):
-                lti, lfi, lei = lt[idx], lf[idx], le[idx]
-                rti, rfi, rei = rt[idx], rf[idx], re[idx]
+                lti, lei, lfi = lidx[:, idx]
+                rti, rei, rfi = ridx[:, idx]
 
                 for jdx in range(nvars):
                     ul = uf[lti][lfi, jdx, lei]
@@ -35,7 +33,7 @@ class BaseAdvecIntInters(BaseIntInters):
                     uf[lti][lfi, jdx, lei] = du
                     uf[rti][rfi, jdx, rei] = -du
 
-        return self.be.make_loop(self.nfpts, compute_delu)
+        return self.be.make_loop(self.nfpts, compute_delu, self.lidx, self.ridx)
 
 
 class BaseAdvecMPIInters(BaseMPIInters):
@@ -43,26 +41,27 @@ class BaseAdvecMPIInters(BaseMPIInters):
 
     def construct_kernels(self, elemap):
         # Buffers
-        lhs = np.empty((self.nvars, self.nfpts))
-        self._rhs = rhs = np.empty((self.nvars, self.nfpts))
+        # TODO : Heterogeneous computing
+        lhs = self.be.alloc_array((self.nvars, self.nfpts))
+        self._rhs = rhs = self.be.alloc_array((self.nvars, self.nfpts))
 
         # View of elemenet array
         self._fpts = fpts = tuple(cell.fpts for cell in elemap.values())
 
         if self.order > 1:
             # Kernel to compute differnce of solution at face
-            self.compute_delu = Kernel(self._make_delu(), rhs, fpts)
+            self.compute_delu = Kernel(*self._make_delu(), rhs, fpts)
         else:
             self.compute_delu = NullKernel
 
         # Kernel for pack, send, receive
-        self.pack = Kernel(self._make_pack(), lhs, fpts)
+        self.pack = Kernel(*self._make_pack(), lhs, fpts)
         self.send, self.sreq = self._make_send(lhs)
         self.recv, self.rreq = self._make_recv(rhs)
 
     def _make_delu(self):
         nvars = self.nvars
-        lt, le, lf = self._lidx
+        lt, le, lf = self.rawlidx
 
         def compute_delu(i_begin, i_end, rhs, uf):
             for idx in range(i_begin, i_end):
@@ -78,7 +77,7 @@ class BaseAdvecMPIInters(BaseMPIInters):
 
     def _make_pack(self):
         nvars = self.nvars
-        lt, le, lf = self._lidx
+        lt, le, lf = self.rawlidx
 
         def pack(i_begin, i_end, lhs, uf):
             for idx in range(i_begin, i_end):
@@ -146,24 +145,24 @@ class BaseAdvecBCInters(BaseBCInters):
 
         if self.order > 1:
             # Kernel to compute differnce of solution at face
-            self.compute_delu = Kernel(self._make_delu(), fpts)
+            self.compute_delu = Kernel(*self._make_delu(), fpts)
         else:
             self.compute_delu = NullKernel
 
     def _make_delu(self):
         nvars = self.nvars
-        lt, le, lf = self._lidx
-        nf = self._vec_snorm
+        lidx = self.lidx
+        nf = self.vec_snorm
 
         bc = self.bc
         array = self.be.local()
 
-        def compute_delu(i_begin, i_end, uf):
+        def compute_delu(i_begin, i_end, lidx, nf, uf):
             for idx in range(i_begin, i_end):
-                ur = array((nvars,))
+                ur = array((nvars,), np.float64)
                 nfi = nf[:, idx]
 
-                lti, lfi, lei = lt[idx], lf[idx], le[idx]
+                lti, lei, lfi = lidx[:, idx]
 
                 ul = uf[lti][lfi, :, lei]
                 bc(ul, ur, nfi)
@@ -172,4 +171,4 @@ class BaseAdvecBCInters(BaseBCInters):
                     du = ur[jdx] - ul[jdx]
                     uf[lti][lfi, jdx, lei] = du
 
-        return self.be.make_loop(self.nfpts, compute_delu)
+        return self.be.make_loop(self.nfpts, compute_delu, lidx, nf)

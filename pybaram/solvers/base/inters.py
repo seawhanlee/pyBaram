@@ -25,11 +25,14 @@ class BaseInters:
         # Order of spatial discretization
         self.order = cfg.getint('solver', 'order', 1)
 
-        self._lidx = self._get_index(elemap, lhs)
+        self.rawlidx = self._get_index(elemap, lhs)
+        self.lidx = be.convert_array(self.rawlidx)
 
         # Normal Vector of face
-        self._mag_snorm = self._get_fpts('_mag_snorm_fpts', elemap)[0]
-        self._vec_snorm = self._get_fpts('_vec_snorm_fpts', elemap)
+        self.raw_mag_snorm = self._get_fpts('_mag_snorm_fpts', elemap)[0]
+        self.raw_vec_snorm = self._get_fpts('_vec_snorm_fpts', elemap)
+        self.mag_snorm = be.convert_array(self.raw_mag_snorm)
+        self.vec_snorm = be.convert_array(self.raw_vec_snorm)
 
     def _get_fpts(self, meth, elemap):
         # Get element property at face and sort it
@@ -42,7 +45,7 @@ class BaseInters:
     
         arr = np.empty((ndim, self.nfpts), dtype=arr0.dtype)
 
-        lidx = self._lidx
+        lidx = self.rawlidx
         for k, ele in enumerate(elemap):
            idx = (lidx[0] == k)
            eidx, fidx = lidx[1, idx], lidx[2, idx]
@@ -61,7 +64,7 @@ class BaseInters:
     
         arr = np.empty((ndim, self.nfpts), dtype=arr0.dtype)
 
-        lidx = self._lidx
+        lidx = self.rawlidx
         for k, ele in enumerate(elemap):
            idx = (lidx[0] == k)
            eidx = lidx[1, idx]
@@ -89,7 +92,8 @@ class BaseIntInters(BaseInters):
         super().__init__(be, cfg, elemap, lhs)
 
         #self._lidx = self._get_index(elemap, lhs)
-        self._ridx = self._get_index(elemap, rhs)
+        self.rawridx = self._get_index(elemap, rhs)
+        self.ridx = be.convert_array(self.rawridx)
 
         if self.order > 1:
             # Delx = xc2 - xc1 across face
@@ -101,8 +105,8 @@ class BaseIntInters(BaseInters):
 
     def _compute_dxc(self, dx):
         nface, ndims = self.nfpts, self.ndims
-        lt, le, lf = self._lidx
-        rt, re, rf = self._ridx
+        lt, le, lf = self.rawlidx
+        rt, re, rf = self.rawridx
 
         # Connecting vector from adjacent elements
         self._dx_adj = np.empty((ndims, nface))
@@ -123,7 +127,7 @@ class BaseIntInters(BaseInters):
                     dxc[rti][rfi, rei, jdx] = -dx
 
         # Compute dx_adj
-        self.be.make_loop(nface, compute_dxc)(self._dx_adj, dx)
+        self.be.make_loop(nface, compute_dxc, host=True)[0](self._dx_adj, dx)
 
     def _construct_ele_graph(self, elemap, lhs, rhs):
         # Construct connectivity (fact to ele)
@@ -180,24 +184,24 @@ class BaseBCInters(BaseInters):
 
         if self.order > 1:
             # Delx across face
-            dxc = [cell.dxc for cell in elemap.values()]
-            self._compute_dxc(*dxc)
+            dxc = tuple(cell.dxc for cell in elemap.values())
+            self._compute_dxc(dxc)
 
         # Compute face center at boundary
         self.xf = self._get_fpts('xf', elemap)
 
-    def _compute_dxc(self, *dx):
+    def _compute_dxc(self, dx):
         nface, ndims = self.nfpts, self.ndims
-        lt, le, lf = self._lidx
+        lidx = self.rawlidx
 
-        nf = self._vec_snorm
+        nf = self.raw_vec_snorm
 
         # Connecting vector from adjacent elements
         self._dx_adj = np.empty((ndims, nface))
 
-        def compute_dxc(i_begin, i_end, dx_adj, *dxc):
+        def compute_dxc(i_begin, i_end, lidx, nf, dx_adj, dxc):
             for idx in range(i_begin, i_end):
-                lti, lfi, lei = lt[idx], lf[idx], le[idx]
+                lti, lei, lfi = lidx[:, idx]
 
                 # Compute normal component of (xf - xc) as dxn
                 dxn = 0
@@ -210,7 +214,7 @@ class BaseBCInters(BaseInters):
                     dx_adj[jdx, idx] = dx
 
         # Compute dx_adj
-        self.be.make_loop(nface, compute_dxc)(self._dx_adj, *dx)
+        self.be.make_loop(nface, compute_dxc, host=True)[0](lidx, nf, self._dx_adj, dx)
 
 
 class BaseVRInters(BaseInters):
@@ -229,21 +233,21 @@ class BaseMPIInters(BaseInters):
 
         if self.order > 1:
             # Delx = xc2 - xc1 across face
-            dxc = [cell.dxc for cell in elemap.values()]
-            self._compute_dxc(*dxc)
+            dxc = tuple(cell.dxc for cell in elemap.values())
+            self._compute_dxc(dxc)
 
-    def _compute_dxc(self, *dx):
+    def _compute_dxc(self, dx):
         from mpi4py import MPI
         comm = MPI.COMM_WORLD
 
         nface, ndims = self.nfpts, self.ndims
-        lt, le, lf = self._lidx
+        lt, le, lf = self.rawlidx
         buf = np.empty((nface, ndims), dtype=np.float64)
 
         # Connecting vector from adjacent elements
         self._dx_adj = np.empty((ndims, nface))
 
-        def pack(i_begin, i_end, buf, *dxc):
+        def pack(i_begin, i_end, buf, dxc):
             # Save dxc to buf for communication
             for idx in range(i_begin, i_end):
                 lti, lfi, lei = lt[idx], lf[idx], le[idx]
@@ -251,7 +255,7 @@ class BaseMPIInters(BaseInters):
                 for jdx in range(ndims):
                     buf[idx, jdx] = dxc[lti][lfi, lei, jdx]
 
-        def compute_dxc(i_begin, i_end, dx_adj, buf, *dxc):
+        def compute_dxc(i_begin, i_end, dx_adj, buf, dxc):
             for idx in range(i_begin, i_end):
                 lti, lfi, lei = lt[idx], lf[idx], le[idx]
 
@@ -265,10 +269,10 @@ class BaseMPIInters(BaseInters):
                     dx_adj[jdx, idx] = dx
 
         # Pack dx
-        self.be.make_loop(nface, pack)(buf, *dx)
+        self.be.make_loop(nface, pack, host=True)[0](buf, dx)
 
         # Exchange halo
         comm.Sendrecv_replace(buf, dest=self._dest, source=self._dest)
 
         # Compute dxc
-        self.be.make_loop(nface, compute_dxc)(self._dx_adj, buf, *dx)
+        self.be.make_loop(nface, compute_dxc, host=True)[0](self._dx_adj, buf, dx)
