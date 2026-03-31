@@ -157,7 +157,7 @@ class BaseSteadyIntegrator(BaseIntegrator):
 
             # Generate JIT kernel by looping RK stage function
             _stage = self.be.make_loop(ele.neles, lvars['stage'], src=f_txt)
-            kernels.append(Kernel(_stage, ele.dt, *ele.upts))
+            kernels.append(Kernel(*_stage, ele.dt, *ele.upts))
         
         # Collect RK stage kernels for elements
         return MetaKernel(kernels)
@@ -298,13 +298,17 @@ class LUSGS(BaseSteadyIntegrator):
         be = self.be
 
         # LU-SGS for each elements
-        for ele in self.sys.eles:      
+        for ele in self.sys.eles:
             # diagonal and lambda array
-            diag = np.empty(ele.neles)
+            diag = self.be.alloc_array(ele.neles)
 
             # Get Python functions of flux and wave speed
             _flux = ele.flux_container()
             nv = (0, ele.nfvars)
+
+            # Constant arrays
+            fnorm_vol, vec_fnorm = ele.fnorm_vol, ele.vec_fnorm
+            nei_ele = ele.nei_ele
 
             # Compile LU-SGS functions
             _update = make_lusgs_update(ele)
@@ -315,14 +319,19 @@ class LUSGS(BaseSteadyIntegrator):
 
             # Initiate LU-SGS kernel objects
             pre_lusgs = Kernel(
-                be.make_loop(ele.neles, _pre_lusgs), 
+                *be.make_loop(ele.neles, _pre_lusgs, fnorm_vol), 
                 ele.dt, diag, ele.fspr
-            )            
-            lsweeps = Kernel(be.make_loop(ele.neles, func=_lsweep),
-                ele.upts[0], ele.upts[1], ele.upts[2], diag, ele.dsrc, ele.fspr) 
-
-            usweeps = Kernel(be.make_loop(ele.neles, func=_usweep),
-                ele.upts[0], ele.upts[1], ele.upts[2], diag, ele.dsrc, ele.fspr)
+            )
+            lsweeps = Kernel(
+                *be.make_loop(ele.neles, _lsweep,
+                              fnorm_vol, vec_fnorm, nei_ele),
+                ele.upts[0], ele.upts[1], ele.upts[2], diag, ele.dsrc, ele.fspr
+            )
+            usweeps = Kernel(
+                *be.make_loop(ele.neles, _usweep,
+                              fnorm_vol, vec_fnorm, nei_ele),
+                ele.upts[0], ele.upts[1], ele.upts[2], diag, ele.dsrc, ele.fspr
+            )
 
             kernels = [pre_lusgs, lsweeps, usweeps]
 
@@ -340,14 +349,17 @@ class LUSGS(BaseSteadyIntegrator):
 
                 # Initiate LU-SGS kernel objects for turbulent variables
                 pre_tlusgs = Kernel(
-                    be.make_loop(ele.neles, _pre_tlusgs), 
+                    *be.make_loop(ele.neles, _pre_tlusgs, fnorm_vol), 
                     ele.dt, diag, ele.tfspr
-                )                
-                tlsweeps = Kernel(be.make_loop(ele.neles, func=_tlsweep),
-                    ele.upts[0], ele.upts[1], ele.upts[2], diag, ele.dsrc, ele.tfspr) 
-
-                tusweeps = Kernel(be.make_loop(ele.neles, func=_tusweep),
-                    ele.upts[0], ele.upts[1], ele.upts[2], diag, ele.dsrc, ele.tfspr)    
+                )
+                tlsweeps = Kernel(
+                    *be.make_loop(ele.neles, _tlsweep, fnorm_vol, vec_fnorm, nei_ele),
+                    ele.upts[0], ele.upts[1], ele.upts[2], diag, ele.dsrc, ele.tfspr
+                )
+                tusweeps = Kernel(
+                    *be.make_loop(ele.neles, _tusweep, fnorm_vol, vec_fnorm, nei_ele),
+                    ele.upts[0], ele.upts[1], ele.upts[2], diag, ele.dsrc, ele.tfspr
+                )
 
                 kernels += [pre_tlusgs, tlsweeps, tusweeps]             
 
@@ -355,7 +367,7 @@ class LUSGS(BaseSteadyIntegrator):
             ele.lusgs = MetaKernel(kernels)
 
             # Update kernel
-            ele.update = Kernel(be.make_loop(ele.neles, _update),
+            ele.update = Kernel(*be.make_loop(ele.neles, _update),
                 ele.upts[0], ele.upts[1]
             )
     
@@ -382,10 +394,17 @@ class ColoredLUSGS(BaseSteadyIntegrator):
         # colored-LU-SGS for each elements
         for ele in self.sys.eles:
             # Get Coloring result
-            ncolor, icolor, lev_color = ele.coloring()
-             
-            # diagonal and lambda array
-            diag = np.empty(ele.neles)
+            ncolor, _icolor, _lev_color = ele.coloring()
+            icolor = be.convert_array(_icolor)
+            lev_color = be.convert_array(_lev_color)
+
+            # Constant arrays
+            fnorm_vol = be.convert_array(ele.fnorm_vol)
+            vec_fnorm = be.convert_array(ele.vec_fnorm)
+            nei_ele = be.convert_array(ele.nei_ele)
+
+            # diagonal array
+            ele.diag = diag = be.alloc_array((ele.neles,))
 
             # Get Python functions of flux and wave speed
             _flux = ele.flux_container()
@@ -394,26 +413,24 @@ class ColoredLUSGS(BaseSteadyIntegrator):
             # Compile LU-SGS functions
             _update = make_lusgs_update(ele)
             _pre_lusgs = make_lusgs_common(ele, factor=1.0)
-            _lsweep, _usweep = make_colored_lusgs(
-                be, ele, nv, icolor, lev_color, _flux
-            )
+            _lsweep, _usweep = make_colored_lusgs(be, ele, nv, _flux)
 
             # Initiate LU-SGS kernel objects
             pre_lusgs = Kernel(
-                be.make_loop(ele.neles, _pre_lusgs), 
+                *be.make_loop(ele.neles, _pre_lusgs, fnorm_vol), 
                 ele.dt, diag, ele.fspr
             )
             
             lsweeps = [
-                Kernel(be.make_loop(n0=n0, ne=ne, func=_lsweep),
-                ele.upts[0], ele.upts[1], ele.upts[2], diag, ele.dsrc, ele.fspr
-                ) 
+                Kernel(*be.make_loop(ne, _lsweep, fnorm_vol, vec_fnorm, nei_ele, icolor, lev_color, n0=n0),
+                       ele.upts[0], ele.upts[1], ele.upts[2], diag, ele.dsrc, ele.fspr
+                )
                 for n0, ne in zip(ncolor[:-1], ncolor[1:])
             ]
 
             usweeps = [
-                Kernel(be.make_loop(n0=n0, ne=ne, func=_usweep),
-                ele.upts[0], ele.upts[1], ele.upts[2], diag, ele.dsrc, ele.fspr
+                Kernel(*be.make_loop(ne, _usweep, fnorm_vol, vec_fnorm, nei_ele, icolor, lev_color, n0=n0),
+                       ele.upts[0], ele.upts[1], ele.upts[2], diag, ele.dsrc, ele.fspr
                 ) 
                 for n0, ne in zip(ncolor[::-1][1:], ncolor[::-1][:-1])
             ]
@@ -428,37 +445,35 @@ class ColoredLUSGS(BaseSteadyIntegrator):
 
                 # Compile LU-SGS functions for turbulent variables
                 _pre_tlusgs = make_lusgs_common(ele, factor=self._tcfl_fac)
-                _tlsweep, _tusweep = make_colored_lusgs(
-                    be, ele, tnv, icolor, lev_color, _tflux
-                )
+                _tlsweep, _tusweep = make_colored_lusgs(be, ele, tnv, _tflux)
 
                 # Initiate LU-SGS kernel objects for turbulent variables
                 pre_tlusgs = Kernel(
-                    be.make_loop(ele.neles, _pre_tlusgs), 
+                    *be.make_loop(ele.neles, _pre_tlusgs, fnorm_vol), 
                     ele.dt, diag, ele.tfspr
-                )                
+                )
 
                 tlsweeps = [
-                    Kernel(be.make_loop(n0=n0, ne=ne, func=_tlsweep),
-                    ele.upts[0], ele.upts[1], ele.upts[2], diag, ele.dsrc, ele.tfspr
-                    ) 
+                    Kernel(*be.make_loop(ne, _tlsweep, fnorm_vol, vec_fnorm, nei_ele, icolor, lev_color, n0=n0),
+                           ele.upts[0], ele.upts[1], ele.upts[2], diag, ele.dsrc, ele.tfspr
+                    )
                     for n0, ne in zip(ncolor[:-1], ncolor[1:])
                 ]
 
                 tusweeps = [
-                    Kernel(be.make_loop(n0=n0, ne=ne, func=_tusweep),
-                    ele.upts[0], ele.upts[1], ele.upts[2], diag, ele.dsrc, ele.tfspr
-                    ) 
+                    Kernel(*be.make_loop(ne, _tusweep, fnorm_vol, vec_fnorm, nei_ele, icolor, lev_color, n0=n0),
+                           ele.upts[0], ele.upts[1], ele.upts[2], diag, ele.dsrc, ele.tfspr
+                    )
                     for n0, ne in zip(ncolor[::-1][1:], ncolor[::-1][:-1])
                 ] 
 
-                kernels += [pre_tlusgs, *tlsweeps, *tusweeps]  
+                kernels += [pre_tlusgs, *tlsweeps, *tusweeps]
 
             # Collect kernels and make meta kernels
             ele.lusgs = MetaKernel(kernels)
 
             # Update kernel
-            ele.update = Kernel(be.make_loop(ele.neles, _update),
+            ele.update = Kernel(*be.make_loop(ele.neles, _update),
                 ele.upts[0], ele.upts[1]
             )
     
@@ -474,12 +489,12 @@ class ColoredLUSGS(BaseSteadyIntegrator):
 
 class BlockJacobi(BaseSteadyIntegrator):
     name = 'jacobi'
-    nreg = 4
+    nreg = 3
     impl_op = 'approx-jacobian'
 
     def construct_stages(self):
         from pybaram.integrators.jacobi import make_jacobi_update, make_jacobi_sweep, \
-                                            make_pre_jacobi, make_tpre_jacobi
+                                            make_pre_jacobi, make_tpre_jacobi, make_diff_solution
 
         # Constants for Jacobi method
         self.subiter = self.cfg.getint('solver-time-integrator', 'sub-iter', 10)
@@ -489,41 +504,46 @@ class BlockJacobi(BaseSteadyIntegrator):
 
         for ele in self.sys.eles:
             # Temporal arrays
-            diag = np.empty((ele.nfvars, ele.nfvars, ele.neles))
-            ele.subres = np.zeros((ele.neles,), dtype=np.float64)
+            ele.dub = be.alloc_array((ele.nvars, ele.neles), init=0)
+            ele.diag = be.alloc_array((ele.nfvars, ele.nfvars, ele.neles))
+            ele.subres = be.alloc_array((ele.neles,))
+            ele.dubp1 = be.alloc_array((ele.neles,), init=0)   # Solution for next sub-iteration
 
+            # Constant arrays
+            fnorm_vol = ele.fnorm_vol
+            nei_ele = ele.nei_ele
             nv = (0, ele.nfvars)
 
             # Diagonal matrix computation kernel
             _pre_jacobi = make_pre_jacobi(be, ele, nv)
-            pre_jacobi = Kernel(be.make_loop(ele.neles, _pre_jacobi),
-                                ele.dt, diag, ele.jmat)
+            pre_jacobi = Kernel(*be.make_loop(ele.neles, _pre_jacobi, fnorm_vol),
+                                ele.dt, ele.diag, ele.jmat)
             
             # Sweep and compute subiteration step solution
             _sweep, _compute = make_jacobi_sweep(be, ele, nv)
-            sweep = Kernel(be.make_loop(ele.neles, _sweep),
-                               ele.upts[1], ele.upts[2], ele.upts[3], ele.jmat)
-            compute = Kernel(be.make_loop(ele.neles, _compute),
-                                 ele.upts[2], ele.upts[3], diag)
+            sweep = Kernel(*be.make_loop(ele.neles, _sweep, fnorm_vol, nei_ele),
+                           ele.upts[1], ele.dub, ele.upts[2], ele.jmat)
+            compute = Kernel(*be.make_loop(ele.neles, _compute),
+                             ele.diag, ele.dub, ele.upts[2])
             
             main_kernels = [sweep, compute]
             
             if self._is_turb:
-                tdiag = np.empty((ele.nturbvars, ele.nturbvars, ele.neles))
+                ele.tdiag = be.alloc_array((ele.nturbvars, ele.nturbvars, ele.neles))
                 tnv = (ele.nfvars, ele.nvars)
 
                 _srcjacobian = ele.make_source_jacobian()
 
                 _pre_tjacobi = make_tpre_jacobi(be, ele, tnv, _srcjacobian, self._tcfl_fac)
-                pre_tjacobi = Kernel(be.make_loop(ele.neles, _pre_tjacobi),
-                                     ele.upts[0], ele.dt, tdiag, ele.tjmat, ele.dsrc)
+                pre_tjacobi = Kernel(*be.make_loop(ele.neles, _pre_tjacobi, fnorm_vol),
+                                     ele.upts[0], ele.dt, ele.tdiag, ele.tjmat, ele.dsrc)
                 
                 # Turbulent sweeps and compute kernel
                 _tsweep, _tcompute = make_jacobi_sweep(be, ele, tnv)
-                tsweep = Kernel(be.make_loop(ele.neles, _tsweep),
-                                ele.upts[1], ele.upts[2], ele.upts[3], ele.tjmat)
-                tcompute = Kernel(be.make_loop(ele.neles, _tcompute),
-                                  ele.upts[2], ele.upts[3], tdiag)
+                tsweep = Kernel(*be.make_loop(ele.neles, _tsweep, fnorm_vol, nei_ele),
+                                ele.upts[1], ele.dub, ele.upts[2], ele.tjmat)
+                tcompute = Kernel(*be.make_loop(ele.neles, _tcompute),
+                                  ele.tdiag, ele.dub, ele.upts[2])
                 
                 main_kernels += [tsweep, tcompute]
                 pre_kernels = [pre_jacobi, pre_tjacobi]
@@ -534,30 +554,31 @@ class BlockJacobi(BaseSteadyIntegrator):
             # Collect kernels and make meta kernels
             ele.jacobi_sweep = MetaKernel(main_kernels)
 
+            # Solution difference
+            _diff_sol = make_diff_solution(self._res_idx)
+            ele.diff_sol = Kernel(*be.make_loop(ele.neles, _diff_sol),
+                                  ele.dub, ele.dubp1, ele.subres)
+
             # Update kernel
             _update = make_jacobi_update(ele)
-            ele.update = Kernel(be.make_loop(ele.neles, _update),
-                                ele.upts[0], ele.upts[2], ele.subres)
-            
-            # Initialize dub array
-            ele.upts[2][:] = 0.0
+            ele.update = Kernel(*be.make_loop(ele.neles, _update),
+                                ele.upts[0], ele.dub, ele.dubp1)
 
     def step(self):
+        subresid = 0.0
         resid = self.rhs(0, 1, is_norm=True)
         self.sys.eles.pre_jacobi()
-        subresid = 0.0
 
         # Sub-iteration for Jacobi method
         for it in range(self.subiter):
             # Jacobi sweep
             self.sys.eles.jacobi_sweep()
+            self.sys.eles.diff_sol()
 
             # Compute sub-residual from all elements
             drhoi = 0.0
             for ele in self.sys.eles:
-                ele.subres -= ele.upts[2][self._res_idx]
-                drhoi += np.dot(ele.subres, ele.subres)
-                ele.subres[:] = ele.upts[2][self._res_idx]
+                drhoi += self.be.reduction(ele.subres)
 
             # Collect L2-norm for all domain
             drho = self._comm.allreduce(drhoi, op=MPI.SUM)
@@ -595,8 +616,11 @@ class BlockLUSGS(BaseSteadyIntegrator):
 
         # Block LU-SGS method for each element
         for ele in self.sys.eles:
+            # Constant arrays
+            fnorm_vol, nei_ele = ele.fnorm_vol, ele.nei_ele
+
             # Temporal array and matrix
-            diag = np.empty((ele.nfvars, ele.nfvars, ele.neles))
+            diag = self.be.alloc_array((ele.nfvars, ele.nfvars, ele.neles))
             ele.subres = np.zeros((ele.neles,), dtype=np.float64)
             nv = (0, ele.nfvars)
             
@@ -606,35 +630,40 @@ class BlockLUSGS(BaseSteadyIntegrator):
             _lower, _upper = make_serial_blusgs(be, ele, nv)
 
             # Initiate Block LU-SGS kernel objects
-            pre_blusgs = Kernel(be.make_loop(ele.neles, _pre_blusgs),
-                                ele.dt, diag, ele.jmat)
+            pre_blusgs = Kernel(
+                *be.make_loop(ele.neles, _pre_blusgs, fnorm_vol),
+                ele.dt, diag, ele.jmat)
             
             # sweep kernels
-            lsweeps = Kernel(be.make_loop(ele.neles, func=_lower),
+            lsweeps = Kernel(
+                *be.make_loop(ele.neles, _lower, fnorm_vol, nei_ele),
                 ele.upts[1], ele.upts[2], diag, ele.jmat)
             
-            usweeps = Kernel(be.make_loop(ele.neles, func=_upper),
+            usweeps = Kernel(
+                *be.make_loop(ele.neles, _upper, fnorm_vol, nei_ele),
                 ele.upts[1], ele.upts[2], diag, ele.jmat)
-
             
             sweep_kernels = [lsweeps, usweeps]
 
             # Block LU-SGS for turbulent model
             if self._is_turb:
-                tdiag = np.empty((ele.nturbvars, ele.nturbvars, ele.neles))
+                tdiag = self.be.alloc_array((ele.nturbvars, ele.nturbvars, ele.neles))
                 tnv = (ele.nfvars, ele.nvars)
 
                 _srcjacobian = ele.make_source_jacobian()
 
                 _pre_tblusgs = make_tpre_blusgs(be, ele, tnv, _srcjacobian, self._tcfl_fac)
-                pre_tblusgs = Kernel(be.make_loop(ele.neles, _pre_tblusgs),
-                                     ele.upts[0], ele.dt, tdiag, ele.tjmat, ele.dsrc)
+                pre_tblusgs = Kernel(
+                    *be.make_loop(ele.neles, _pre_tblusgs, fnorm_vol),
+                    ele.upts[0], ele.dt, tdiag, ele.tjmat, ele.dsrc)
                 
                 _tlsweep, _tusweep = make_serial_blusgs(be, ele, tnv)
-                tlsweep = Kernel(be.make_loop(ele.neles, _tlsweep),
-                                 ele.upts[1], ele.upts[2], tdiag, ele.tjmat)
-                tusweep = Kernel(be.make_loop(ele.neles, _tusweep),
-                                 ele.upts[1], ele.upts[2], tdiag, ele.tjmat)
+                tlsweep = Kernel(
+                    *be.make_loop(ele.neles, _tlsweep, fnorm_vol, nei_ele),
+                    ele.upts[1], ele.upts[2], tdiag, ele.tjmat)
+                tusweep = Kernel(
+                    *be.make_loop(ele.neles, _tusweep, fnorm_vol, nei_ele),
+                    ele.upts[1], ele.upts[2], tdiag, ele.tjmat)
 
                 sweep_kernels += [tlsweep, tusweep]
                 pre_kernels = [pre_blusgs, pre_tblusgs]
@@ -646,7 +675,7 @@ class BlockLUSGS(BaseSteadyIntegrator):
             ele.blusgs_sweep = MetaKernel(sweep_kernels)
 
             # Update kernel
-            ele.update = Kernel(be.make_loop(ele.neles, _update),
+            ele.update = Kernel(*be.make_loop(ele.neles, _update),
                                 ele.upts[0], ele.upts[2], ele.subres)
 
             # Initialize dub array
@@ -694,11 +723,11 @@ class BlockLUSGS(BaseSteadyIntegrator):
 
 class ColoredBlockLUSGS(BaseSteadyIntegrator):
     name = 'colored-blu-sgs'
-    nreg = 3
+    nreg = 2
     impl_op = 'approx-jacobian'
 
     def construct_stages(self):
-        from pybaram.integrators.blusgs import make_pre_blusgs, make_tpre_blusgs, \
+        from pybaram.integrators.blusgs import make_pre_blusgs, make_tpre_blusgs, make_diff_solution, \
                                             make_colored_blusgs, make_blusgs_update
         
         # Constants for Block LU-SGS subiteration
@@ -710,34 +739,41 @@ class ColoredBlockLUSGS(BaseSteadyIntegrator):
         # Colored Block LU-SGS for each elements
         for ele in self.sys.eles:
             # Get coloring result
-            ncolor, icolor, lev_color = ele.coloring()
+            ncolor, _icolor, _lev_color = ele.coloring()
+            icolor = be.convert_array(_icolor)
+            lev_color = be.convert_array(_lev_color)
 
-            # Temporal array and matrix
-            diag = np.empty((ele.nfvars, ele.nfvars, ele.neles))
-            ele.subres = np.zeros((ele.neles,), dtype=np.float64)
+            # Constant arrays
+            fnorm_vol = be.convert_array(ele.fnorm_vol)
+            nei_ele = be.convert_array(ele.nei_ele)
 
+            # Temporal array
+            ele.diag = be.alloc_array((ele.nfvars, ele.nfvars, ele.neles))
+            ele.subres = be.alloc_array((ele.neles,))
+            ele.dub = be.alloc_array((ele.nvars, ele.neles), init=0)
+            ele.dubp1 = be.alloc_array((ele.neles,), init=0)   # Solution for next sub-iteration
             nv = (0, ele.nfvars)
 
             # Compile Block LU-SGS functions
             _update = make_blusgs_update(ele)
             _pre_blusgs = make_pre_blusgs(be, ele, nv)
-            _sweep = make_colored_blusgs(be, ele, nv, icolor, lev_color)
+            _sweep = make_colored_blusgs(be, ele, nv)
 
             # Initiate Block LU-SGS kernel objects
             pre_blusgs = Kernel(
-                be.make_loop(ele.neles, _pre_blusgs),
-                ele.dt, diag, ele.jmat
+                *be.make_loop(ele.neles, _pre_blusgs, fnorm_vol),
+                ele.dt, ele.diag, ele.jmat
             )
 
             lsweeps = [
-                Kernel(be.make_loop(n0=n0, ne=ne, func=_sweep),
-                ele.upts[1], ele.upts[2], diag, ele.jmat)
+                Kernel(*be.make_loop(ne, _sweep, fnorm_vol, nei_ele, icolor, lev_color, n0=n0),
+                       ele.upts[1], ele.dub, ele.diag, ele.jmat)
                 for n0, ne in zip(ncolor[:-1], ncolor[1:])
             ]
 
             usweeps = [
-                Kernel(be.make_loop(n0=n0, ne=ne, func=_sweep),
-                ele.upts[1], ele.upts[2], diag, ele.jmat)
+                Kernel(*be.make_loop(ne, _sweep, fnorm_vol, nei_ele, icolor, lev_color, n0=n0),
+                       ele.upts[1], ele.dub, ele.diag, ele.jmat)
                 for n0, ne in zip(ncolor[::-1][1:], ncolor[::-1][:-1])
             ]
 
@@ -746,27 +782,28 @@ class ColoredBlockLUSGS(BaseSteadyIntegrator):
             # Colored Block LU-SGS for turbulence model
             if self._is_turb:
                 # digonal matrix for turbulence model
-                tdiag = np.empty((ele.nturbvars, ele.nturbvars, ele.neles))
+                ele.tdiag = be.alloc_array((ele.nturbvars, ele.nturbvars, ele.neles))
                 tnv = (ele.nfvars, ele.nvars)
 
                 # Source term Jacobian
                 _srcjacobian = ele.make_source_jacobian()
 
                 _pre_tblusgs = make_tpre_blusgs(be, ele, tnv, _srcjacobian, self._tcfl_fac)
-                pre_tblusgs = Kernel(be.make_loop(ele.neles, _pre_tblusgs),
-                                     ele.upts[0], ele.dt, tdiag, ele.tjmat, ele.dsrc)
+                pre_tblusgs = Kernel(
+                    *be.make_loop(ele.neles, _pre_tblusgs, fnorm_vol),
+                    ele.upts[0], ele.dt, ele.tdiag, ele.tjmat, ele.dsrc)
                 
-                _tsweep = make_colored_blusgs(be, ele, tnv, icolor, lev_color)
+                _tsweep = make_colored_blusgs(be, ele, tnv)
 
                 tlsweeps = [
-                    Kernel(be.make_loop(n0=n0, ne=ne, func=_tsweep),
-                    ele.upts[1], ele.upts[2], tdiag, ele.tjmat)
+                    Kernel(*be.make_loop(ne, _tsweep, fnorm_vol, nei_ele, icolor, lev_color, n0=n0),
+                           ele.upts[1], ele.dub, ele.tdiag, ele.tjmat)
                     for n0, ne in zip(ncolor[:-1], ncolor[1:])
                 ]
 
                 tusweeps = [
-                    Kernel(be.make_loop(n0=n0, ne=ne, func=_tsweep),
-                    ele.upts[1], ele.upts[2], tdiag, ele.tjmat)
+                    Kernel(*be.make_loop(ne, _tsweep, fnorm_vol, nei_ele, icolor, lev_color, n0=n0),
+                           ele.upts[1], ele.dub, ele.tdiag, ele.tjmat)
                     for n0, ne in zip(ncolor[::-1][1:], ncolor[::-1][:-1])
                 ]
 
@@ -779,32 +816,32 @@ class ColoredBlockLUSGS(BaseSteadyIntegrator):
             # Collect all kernels
             ele.blusgs_sweep = MetaKernel(sweep_kernels)
 
-            # Update kernel
-            ele.update = Kernel(be.make_loop(ele.neles, _update),
-                                ele.upts[0], ele.upts[2], ele.subres)
-            
-            # Initialize dub array
-            ele.upts[2][:] = 0.0
+            # Solution difference
+            _diff_sol = make_diff_solution(self._res_idx)
+            ele.diff_sol = Kernel(*be.make_loop(ele.neles, _diff_sol),
+                                  ele.dub, ele.dubp1, ele.subres)
 
+            # Update kernel
+            ele.update = Kernel(*be.make_loop(ele.neles, _update),
+                                ele.upts[0], ele.dub, ele.dubp1)
     
     def step(self):
+        subresid = 0.0
         resid = self.rhs(0, 1, is_norm=True)
 
         # Compute diagonal matrix
         self.sys.eles.pre_blusgs()
-        subresid = 0.0
 
         # Subiteration for Block LU-SGS
         for it in range(self.subiter):
             # Block LU-SGS sweep
             self.sys.eles.blusgs_sweep()
+            self.sys.eles.diff_sol()
 
             # Compute sub-residual from all elements
             drhoi = 0.0
             for ele in self.sys.eles:
-                ele.subres -= ele.upts[2][self._res_idx]
-                drhoi += np.dot(ele.subres, ele.subres)
-                ele.subres[:] = ele.upts[2][self._res_idx]
+                drhoi += self.be.reduction(ele.subres)
 
             # Collect L2-norm for all domain
             drho = self._comm.allreduce(drhoi, op=MPI.SUM)

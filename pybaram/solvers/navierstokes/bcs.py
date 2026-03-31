@@ -13,7 +13,7 @@ def get_bc(self, be, name, bcargs):
 def make_bc_adia_wall(bcargs):
     nvars, ndims = bcargs['nfvars'], bcargs['ndims']
 
-    def bc(ul, ur, *args):
+    def bc(ul, ur, nf):
         ur[0] = ul[0]
 
         for idx in range(ndims):
@@ -30,7 +30,7 @@ def make_bc_isotherm_wall(bcargs):
     pmin = bcargs['pmin']   
     cptw = bcargs['cptw']
     
-    def bc(ul, ur, *args):
+    def bc(ul, ur, nf):
         # Specific Enthalpy
         p = max((gamma - 1)*(ul[nvars-1] - 0.5 *
                              dot(ul, ul, ndims, 1, 1)/ul[0]), pmin)

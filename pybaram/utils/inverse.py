@@ -25,7 +25,7 @@ def make_lu_dcmp(be, nvars):
     lvar = {}
     exec(f_txt, gvar, lvar)
     
-    return be.compile(lvar['_dcmp'])
+    return be.compile(lvar['_dcmp'], src=f_txt)
 
 
 def make_substitution(be, nvars):
@@ -54,4 +54,4 @@ def make_substitution(be, nvars):
     lvar = {}
     exec(f_txt, gvar, lvar)
 
-    return be.compile(lvar['_sub'])
+    return be.compile(lvar['_sub'], src=f_txt)

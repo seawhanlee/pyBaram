@@ -145,7 +145,7 @@ def make_none_jacobian(be, cplargs, sign):
     No viscous flux Jacobian
     """
 
-    def visjacobian(*args):
+    def visjacobian(uf, nf, A, mu, rcp_dx):
         pass
 
     return be.compile(visjacobian)

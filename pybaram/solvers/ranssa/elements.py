@@ -37,7 +37,7 @@ class RANSSAFluidElements(ViscousFluidElements):
         cv1 = self._turb_coeffs['cv1']
         cv13 = cv1**3
 
-        def mut(u, g, mu, *args):
+        def mut(u, g, mu, d):
             # Dynamic viscosity
             rho, nut = u[0], u[nvars-1]
             nu = mu/rho
@@ -56,7 +56,7 @@ class RANSSAFluidElements(ViscousFluidElements):
         def tflux(u, nf, f):
             # Convective flux for turbulent variables
             rho = u[0]
-            contrav = dot(u, nf, ndims, 1)/rho
+            contrav = dot(u, nf, ndims, 1, 0)/rho
 
             f[0] = u[nvars-1]*contrav
 
@@ -171,23 +171,23 @@ class RANSSAElements(RANSElements, RANSSAFluidElements):
         _compute_mu = self.mu_container()
         _compute_mut = self.mut_container()
 
-        def post(i_begin, i_end, upts, grad, mu, mut):
+        def post(i_begin, i_end, ydist, upts, grad, mu, mut):
             # Apply the function over eleemnts
             for idx in range(i_begin, i_end):
                 _fix_nonPys(upts[:, idx])
                 mu[idx] = _compute_mu(upts[:, idx])
-                mut[idx] = _compute_mut(upts[:, idx], None, mu[idx])
+                mut[idx] = _compute_mut(upts[:, idx], None, mu[idx], None)
 
         return self.be.make_loop(self.neles, post)   
 
     def make_turb_wave_speed(self):
         # Dimensions and constants
         ndims, nvars = self.ndims, self.nvars
-        sigma = self._turb_coeffs['sigma']
+        sigma = float(self._turb_coeffs['sigma'])
 
-        def _lambdaf(u, nf, rcp_dx, mu, *args):
+        def _lambdaf(u, nf, rcp_dx, mu, mut):
             rho = u[0]
-            contra = dot(u, nf, ndims, 1)/rho
+            contra = dot(u, nf, ndims, 1, 0)/rho
 
             nu = mu/rho
             nut = u[nvars-1]
@@ -199,7 +199,7 @@ class RANSSAElements(RANSElements, RANSSAFluidElements):
 
     def make_turb_jacobian(self, sign='positive'):
         ndims, nvars = self.ndims, self.nvars
-        sigma = self._turb_coeffs['sigma']
+        sigma = float(self._turb_coeffs['sigma'])
 
         if sign == 'positive':
             op = 1.0
@@ -210,9 +210,9 @@ class RANSSAElements(RANSElements, RANSSAFluidElements):
 
         # Compute turbulence Jacobian
         # Upwind scheme applied
-        def _jacobian(um, nf, A, rcp_dx, mu, *args):
+        def _jacobian(um, nf, A, rcp_dx, mu, mut, gf, ydnsi):
             rho = um[0]
-            contra = dot(um, nf, ndims, 1)/rho
+            contra = dot(um, nf, ndims, 1, 0)/rho
             nu = mu/rho
             nut = um[nvars-1]
 

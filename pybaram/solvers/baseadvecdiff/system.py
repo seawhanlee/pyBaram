@@ -102,7 +102,13 @@ class BaseAdvecDiffSystem(BaseAdvecSystem):
 
         if is_norm:
             # Compute residual if requested
-            resid = sum(self.eles.compute_resid())
+            self.eles.compute_resid()
+            self.eles.reduce_resid()
+
+            # Wait for the mapped memory reduction
+            self.be.wait()
+            resid = sum(self.eles.h_resid)
+            
             return resid
         else:
             return 'none'

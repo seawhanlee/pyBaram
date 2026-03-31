@@ -37,18 +37,19 @@ class RANSElements(BaseAdvecDiffElements):
 
     def construct_kernels(self, vertex, nreg, impl_op):
         # Aux array
+        # raw-prefixed array : np.ndarray
         nauxvars = len(self.auxvars)
-        self.aux = aux = np.empty((nauxvars, self.neles))
+        self.rawaux = rawaux = np.empty((nauxvars, self.neles))
 
         # Assign aux variable
-        self.ydist, self.mu, self.mut = aux
+        self.rawydist, self.rawmu, self.rawmut = rawaux
 
         if hasattr(self, "_aux"):
-            self.aux[:] = self._aux
+            self.rawaux[:] = self._aux
             delattr(self, "_aux")
             is_aux_initialized = True
         else:
-            self.aux[0] = self._ydist
+            self.rawaux[0] = self._ydist
             delattr(self, '_ydist')
             is_aux_initialized = False
 
@@ -57,31 +58,35 @@ class RANSElements(BaseAdvecDiffElements):
 
         if impl_op == 'spectral-radius':
             # Spectral radius (flow and turbulent model)
-            self.fspr = np.empty((self.nface, self.neles))
-            self.tfspr = np.empty_like(self.fspr)
+            self.fspr = self.be.alloc_array((self.nface, self.neles))
+            self.tfspr = self.be.alloc_array((self.nface, self.neles))
         elif impl_op == 'approx-jacobian':
             # Jacobian matrices (flow and turbulent model)
             # 2-dimensional arrays (FVS and Upwind)
-            self.jmat = np.empty((2, self.nfvars, self.nfvars, \
+            self.jmat = self.be.alloc_array((2, self.nfvars, self.nfvars, \
                                   self.nface, self.neles))
-            self.tjmat = np.empty((2, self.nturbvars, self.nturbvars, \
+            self.tjmat = self.be.alloc_array((2, self.nturbvars, self.nturbvars, \
                                    self.nface, self.neles))
 
-        # Update arguments of post kerenl
-        self.post.update_args(self.upts_in, self.grad, self.mu, self.mut)
-        
-        if not is_aux_initialized:            
+        self.aux = self.be.convert_array(rawaux)
+        self.ydist, self.mu, self.mut = self.aux
+
+        # Update arguments of post kernel
+        self.post.update_args(self.ydist, self.upts_in, self.grad, self.mu, self.mut)
+
+        if not is_aux_initialized:
             # Initialize viscosity
             self.post()
 
         # Update arguments of divergence kernel
+        rcp_vol = self.be.convert_array(self.rcp_vol)
         self.div_upts.update_args(
-            self.upts_out, self.fpts, self.upts_in, self.grad,
-            self.dsrc, self.mu, self.mut
+            rcp_vol, self.ydist, self.upts_out, self.fpts, self.upts_in,
+            self.grad, self.dsrc, self.mu, self.mut
         )
 
         # Kernel to compute timestep
-        self.timestep = Kernel(self._make_timestep(),
+        self.timestep = Kernel(*self._make_timestep(),
                                self.upts_in, self.mu, self.mut, self.dt)
 
     def _wall_distance(self, btri):
@@ -175,7 +180,7 @@ class RANSElements(BaseAdvecDiffElements):
         _, idx = tree.query(self.xc[mask], k=n_neighbor, workers=workers)
 
         is_masked = np.where(mask)[0]
-        self.be.make_loop(len(is_masked), distf)(is_masked, idx, xw, self.xc, wdist)
+        self.be.make_loop(len(is_masked), distf, host=True)[0](is_masked, idx, xw, self.xc, wdist)
         
         # Delete tree
         del(tree)
@@ -203,7 +208,7 @@ class RANSElements(BaseAdvecDiffElements):
         _, idx = tree.query(self.xc[mask], k=n_neighbor)
 
         is_masked = np.where(mask)[0]
-        self.be.make_loop(len(is_masked), distf)(is_masked, idx, xw, self.xc, wdist)
+        self.be.make_loop(len(is_masked), distf, host=True)[0](is_masked, idx, xw, self.xc, wdist)
         
         # Delete tree
         del(tree)
@@ -217,7 +222,7 @@ class RANSElements(BaseAdvecDiffElements):
         def _lambdaf(u, nf, rcp_dx, mu, mut):
             rho, et = u[0], u[nfvars-1]
 
-            contra = dot(u, nf, ndims, 1)/rho
+            contra = dot(u, nf, ndims, 1, 0)/rho
             p = max((gamma - 1)*(et - 0.5*dot(u, u, ndims, 1, 1)/rho), pmin)
             c = np.sqrt(gamma*p/rho)
 
@@ -232,14 +237,16 @@ class RANSElements(BaseAdvecDiffElements):
         nflvars = self.nfvars
 
         # Static variables
-        vol = self._vol
-        smag, svec = self._gen_snorm_fpts()
+        vol = self.vol
+        _smag, _svec = self._gen_snorm_fpts()
+        smag = self.be.convert_array(_smag)
+        svec = self.be.convert_array(_svec)
 
         # Constants
         gamma, pmin = self._const['gamma'], self._const['pmin']
         pr, prt = self._const['pr'], self._const['prt']
 
-        def timestep(i_begin, i_end, u, mu, mut, dt, cfl):
+        def timestep(i_begin, i_end, smag, svec, vol, u, mu, mut, dt, cfl):
             for idx in range(i_begin, i_end):
                 rho = u[0, idx]
                 et = u[nflvars-1, idx]
@@ -252,7 +259,7 @@ class RANSElements(BaseAdvecDiffElements):
                 lamc, lamv = 0.0, 0.0
                 for jdx in range(nface):
                     # Inviscid spectral radius: Wave speed abs(Vn) + c
-                    lamc += (abs(dot(u[:, idx], svec[jdx, idx], ndims, 1))/rho + c)*smag[jdx, idx]
+                    lamc += (abs(dot(u[:, idx], svec[jdx, idx], ndims, 1, 0))/rho + c)*smag[jdx, idx]
 
                     # Viscous spectral radisu: max(4/3 \gamma)/rho/(mu/pr+mut/prt)/length
                     lamv += (1/rho*max(4/3, gamma)*(mu[idx]/pr + mut[idx]/prt)*
@@ -261,14 +268,14 @@ class RANSElements(BaseAdvecDiffElements):
                 # Time step : CFL * vol / max(lam_c, C*lam_v), C=4
                 dt[idx] = cfl*vol[idx] / max(lamc, 4*lamv)
 
-        return self.be.make_loop(self.neles, timestep)
+        return self.be.make_loop(self.neles, timestep, smag, svec, vol)
 
     def _make_recon(self):
         nface, ndims = self.nface, self.ndims
         nvars, nfvars = self.nvars, self.nfvars
-        op = self.dxf
+        op = self.be.convert_array(self.dxf)
 
-        def _cal_recon(i_begin, i_end, upts, grad, lim, fpts):
+        def _cal_recon(i_begin, i_end, op, upts, grad, lim, fpts):
             for i in range(i_begin, i_end):
                 for l in range(nfvars):
                     for k in range(nface):
@@ -282,17 +289,15 @@ class RANSElements(BaseAdvecDiffElements):
                     for k in range(nface):
                         fpts[k, l, i] = upts[l, i]
 
-        return self.be.make_loop(self.neles,_cal_recon)
+        return self.be.make_loop(self.neles,_cal_recon, op)
 
     def _make_div_upts(self):
         nvars, nface = self.nvars, self.nface
 
-        rcp_vol = self.rcp_vol
-        ydist = self.ydist
-
         turb_src = self.turb_src_container()
 
-        def _div_upts(i_begin, i_end, rhs, fpts, upts, grad, dsrc, mu, mut, t=0):
+        def _div_upts(i_begin, i_end, rcp_vol, ydist,
+                      rhs, fpts, upts, grad, dsrc, mu, mut, t=0):
             for idx in range(i_begin, i_end):
                 rcp_voli = rcp_vol[idx]
                 for jdx in range(nvars):
@@ -314,10 +319,9 @@ class RANSElements(BaseAdvecDiffElements):
         _compute_mu = self.mu_container()
         _compute_mut = self.mut_container()
 
-        ydist = self.ydist
         muf = self._const['mu']
 
-        def post(i_begin, i_end, upts, grad, mu, mut):
+        def post(i_begin, i_end, ydist, upts, grad, mu, mut):
             # Apply the function over eleemnts
             for idx in range(i_begin, i_end):
                 _fix_nonPys(upts[:, idx])

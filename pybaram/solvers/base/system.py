@@ -18,6 +18,9 @@ class BaseSystem:
     _vertex_cls = BaseVertex
 
     def __init__(self, be, cfg, msh, soln, comm, nreg, impl_op):
+        # Backend
+        self.be = be
+        
         # Save parallel infos
         self._comm = comm
         self.rank = rank = comm.rank

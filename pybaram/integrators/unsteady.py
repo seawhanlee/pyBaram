@@ -78,7 +78,7 @@ class BaseUnsteadyIntegrator(BaseIntegrator):
 
             # Generate JIT kernel by looping RK stage function
             _stage = self.be.make_loop(ele.neles, lvars['stage'], src=f_txt)
-            kernels.append(Kernel(_stage, *ele.upts, arg_trans_pos=True))
+            kernels.append(Kernel(*_stage, *ele.upts, arg_trans_pos=True))
         
         # Collect RK stage kernels for elements
         return ProxyList(kernels)

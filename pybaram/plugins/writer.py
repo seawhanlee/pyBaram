@@ -13,6 +13,8 @@ class WriterPlugin(BasePlugin):
     name = 'writer'
 
     def __init__(self, intg, cfg, suffix):
+        super().__init__(intg, cfg, suffix)
+
         # Parse uuid
         uuid = intg.mesh['mesh_uuid']
 
@@ -29,7 +31,7 @@ class WriterPlugin(BasePlugin):
         self._fname = cfg.get('soln-plugin-writer', 'name')
         self.out = {'config': cfg.tostr(), 'mesh_uuid': uuid}
 
-        # Check integratro mode (steady | unsteady) and frequency to compute the plugin
+        # Check integrator mode (steady | unsteady) and frequency to compute the plugin
         self.mode = mode = intg.mode
         if mode == 'unsteady':
             self.dtout = cfg.getfloat('soln-plugin-writer', 'dt-out')

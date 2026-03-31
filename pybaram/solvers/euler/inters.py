@@ -9,7 +9,7 @@ import numpy as np
 
 class EulerIntInters(BaseAdvecIntInters):
     def construct_kernels(self, elemap, impl_op):
-        super().construct_kernels(elemap)        
+        super().construct_kernels(elemap)
 
         # Collect face point array
         fpts = self._fpts
@@ -17,19 +17,19 @@ class EulerIntInters(BaseAdvecIntInters):
         if impl_op == 'spectral-radius':
             # Collect array to save spectral raidus
             fspr = tuple(cell.fspr for cell in elemap.values())
-            self.compute_flux = Kernel(self._make_flux(impl_op), fpts, fspr)
+            self.compute_flux = Kernel(*self._make_flux(impl_op), fpts, fspr)
         elif impl_op == 'approx-jacobian':
             # Collect array to save Jacobian
             fjmat = tuple(cell.jmat for cell in elemap.values())
-            self.compute_flux = Kernel(self._make_flux(impl_op), fpts, fjmat)
+            self.compute_flux = Kernel(*self._make_flux(impl_op), fpts, fjmat)
         else:
-            self.compute_flux = Kernel(self._make_flux(impl_op), fpts)
+            self.compute_flux = Kernel(*self._make_flux(impl_op), fpts)
 
     def _make_flux(self, impl_op):
         ndims, nfvars = self.ndims, self.nfvars
-        lt, le, lf = self._lidx
-        rt, re, rf = self._ridx
-        nf, sf = self._vec_snorm, self._mag_snorm
+        lidx = self.lidx
+        ridx = self.ridx
+        nf, sf = self.vec_snorm, self.mag_snorm
 
         # Compiler arguments
         array = self.be.local()
@@ -50,16 +50,16 @@ class EulerIntInters(BaseAdvecIntInters):
             # Get wave speed function
             wave_speed = self.ele0.make_wave_speed()
 
-            def comm_flux_spr(i_begin, i_end, uf, lam):
+            def comm_flux_spr(i_begin, i_end, lidx, ridx, nf, sf, uf, lam):
                 for idx in range(i_begin, i_end):
-                    fn = array((nfvars,))
+                    fn = array((nfvars,), np.float64)
 
                     # Normal vector
                     nfi = nf[:, idx]
 
                     # Left and right solutions
-                    lti, lfi, lei = lt[idx], lf[idx], le[idx]
-                    rti, rfi, rei = rt[idx], rf[idx], re[idx]
+                    lti, lei, lfi = lidx[:, idx]
+                    rti, rei, rfi = ridx[:, idx]
                     ul = uf[lti][lfi, :, lei]
                     ur = uf[rti][rfi, :, rei]
 
@@ -80,7 +80,7 @@ class EulerIntInters(BaseAdvecIntInters):
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
                         uf[rti][rfi, jdx, rei] = -fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux_spr)
+            return self.be.make_loop(self.nfpts, comm_flux_spr, lidx, ridx, nf, sf)
         elif impl_op == 'approx-jacobian':
             from pybaram.solvers.euler.jacobian import make_convective_jacobian
 
@@ -88,24 +88,23 @@ class EulerIntInters(BaseAdvecIntInters):
             pos_jacobian = make_convective_jacobian(self.be, cplargs, 'positive')
             neg_jacobian = make_convective_jacobian(self.be, cplargs, 'negative')
 
-            def comm_flux_ajac(i_begin, i_end, uf, jmats):
+            def comm_flux_ajac(i_begin, i_end, lidx, ridx, nf, sf, uf, jmats):
                 for idx in range(i_begin, i_end):
-                    fn = array((nfvars,))
+                    fn = array((nfvars,), np.float64)
 
                     # Jacobian matrix
-                    ap = array((nfvars, nfvars))
-                    am = array((nfvars, nfvars))
+                    ap = array((nfvars, nfvars), np.float64)
+                    am = array((nfvars, nfvars), np.float64)
 
                     # Normal vector
                     nfi = nf[:, idx]
 
                     # Left and right solutions
-                    lti, lfi, lei = lt[idx], lf[idx], le[idx]
-                    rti, rfi, rei = rt[idx], rf[idx], re[idx]
+                    lti, lei, lfi = lidx[:, idx]
+                    rti, rei, rfi = ridx[:, idx]
                     ul = uf[lti][lfi, :, lei]
                     ur = uf[rti][rfi, :, rei]
 
-                    # Compute approixmate Riemann solver
                     flux(ul, ur, nfi, fn)
 
                     # Compute Jacobian matrix on surface
@@ -126,18 +125,18 @@ class EulerIntInters(BaseAdvecIntInters):
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
                         uf[rti][rfi, jdx, rei] = -fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux_ajac)
+            return self.be.make_loop(self.nfpts, comm_flux_ajac, lidx, ridx, nf, sf)
         else:            
-            def comm_flux(i_begin, i_end, uf):
+            def comm_flux(i_begin, i_end, lidx, ridx, nf, uf):
                 for idx in range(i_begin, i_end):
-                    fn = array((nfvars,))
+                    fn = array((nfvars,), np.float64)
 
                     # Normal vector
                     nfi = nf[:, idx]
 
                     # Left and right solutions
-                    lti, lfi, lei = lt[idx], lf[idx], le[idx]
-                    rti, rfi, rei = rt[idx], rf[idx], re[idx]
+                    lti, lei, lfi = lidx[:, idx]
+                    rti, rei, rfi = ridx[:, idx]
                     ul = uf[lti][lfi, :, lei]
                     ur = uf[rti][rfi, :, rei]
 
@@ -149,7 +148,7 @@ class EulerIntInters(BaseAdvecIntInters):
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
                         uf[rti][rfi, jdx, rei] = -fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux)    
+            return self.be.make_loop(self.nfpts, comm_flux, lidx, ridx, nf)    
 
 
 class EulerMPIInters(BaseAdvecMPIInters):
@@ -162,19 +161,19 @@ class EulerMPIInters(BaseAdvecMPIInters):
         if impl_op == 'spectral-radius':
             # Collect array to save spectral raidus
             fspr = tuple(cell.fspr for cell in elemap.values())
-            self.compute_flux = Kernel(self._make_flux(impl_op), rhs, fpts, fspr)
+            self.compute_flux = Kernel(*self._make_flux(impl_op), rhs, fpts, fspr)
         elif impl_op == 'approx-jacobian':
             # Collect array to save Jacobian
             fjmat = tuple(cell.jmat for cell in elemap.values())
-            self.compute_flux = Kernel(self._make_flux(impl_op), rhs, fpts, fjmat)
+            self.compute_flux = Kernel(*self._make_flux(impl_op), rhs, fpts, fjmat)
         else:
-            self.compute_flux = Kernel(self._make_flux(impl_op), rhs, fpts)
+            self.compute_flux = Kernel(*self._make_flux(impl_op), rhs, fpts)
 
 
     def _make_flux(self, impl_op):
         ndims, nfvars = self.ndims, self.nfvars
-        lt, le, lf = self._lidx
-        nf, sf = self._vec_snorm, self._mag_snorm
+        lidx = self.lidx
+        nf, sf = self.vec_snorm, self.mag_snorm
 
         # Compiler arguments
         array = self.be.local()
@@ -195,15 +194,15 @@ class EulerMPIInters(BaseAdvecMPIInters):
             # Get wave speed function
             wave_speed = self.ele0.make_wave_speed()
 
-            def comm_flux_spr(i_begin, i_end, rhs, uf, lam):
+            def comm_flux_spr(i_begin, i_end, lidx, nf, sf, rhs, uf, lam):
                 for idx in range(i_begin, i_end):
-                    fn = array((nfvars,))
+                    fn = array((nfvars,), np.float64)
 
                     # Normal vector
                     nfi = nf[:, idx]
 
                     # Left and right solutions
-                    lti, lfi, lei = lt[idx], lf[idx], le[idx]
+                    lti, lei, lfi = lidx[:, idx]
                     ul = uf[lti][lfi, :, lei]
                     ur = rhs[:, idx]
 
@@ -218,23 +217,23 @@ class EulerMPIInters(BaseAdvecMPIInters):
                         # Save it at left solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux_spr)
+            return self.be.make_loop(self.nfpts, comm_flux_spr, lidx, nf, sf)
         elif impl_op == 'approx-jacobian':
             from pybaram.solvers.euler.jacobian import make_convective_jacobian
 
             # Get Jacobian functions
             com_aprx_jac = make_convective_jacobian(self.be, cplargs, 'positive')
 
-            def comm_flux_ajac(i_begin, i_end, rhs, uf, jmats):
+            def comm_flux_ajac(i_begin, i_end, lidx, nf, sf, rhs, uf, jmats):
                 for idx in range(i_begin, i_end):
-                    fn = array((nfvars,))
-                    ap = array((nfvars, nfvars))
+                    fn = array((nfvars,), np.float64)
+                    ap = array((nfvars, nfvars), np.float64)
 
                     # Normal vector
                     nfi = nf[:, idx]
 
                     # Left and right solutions
-                    lti, lfi, lei = lt[idx], lf[idx], le[idx]
+                    lti, lei, lfi = lidx[:, idx]
                     ul = uf[lti][lfi, :, lei]
                     ur = rhs[:, idx]
 
@@ -251,17 +250,17 @@ class EulerMPIInters(BaseAdvecMPIInters):
                         # Save it at left solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux_ajac)
+            return self.be.make_loop(self.nfpts, comm_flux_ajac, lidx, nf, sf)
         else:
-            def comm_flux(i_begin, i_end, rhs, uf):
+            def comm_flux(i_begin, i_end, lidx, nf, sf, rhs, uf):
                 for idx in range(i_begin, i_end):
-                    fn = array((nfvars,))
+                    fn = array((nfvars,), np.float64)
 
                     # Normal vector
                     nfi = nf[:, idx]
 
                     # Left and right solutions
-                    lti, lfi, lei = lt[idx], lf[idx], le[idx]
+                    lti, lei, lfi = lidx[:, idx]
                     ul = uf[lti][lfi, :, lei]
                     ur = rhs[:, idx]
 
@@ -272,7 +271,7 @@ class EulerMPIInters(BaseAdvecMPIInters):
                         # Save it at left solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux)
+            return self.be.make_loop(self.nfpts, comm_flux, lidx, nf, sf)
 
 
 class EulerBCInters(BaseAdvecBCInters):
@@ -288,16 +287,18 @@ class EulerBCInters(BaseAdvecBCInters):
             # Collect array to save spectral raidus
             fspr = tuple(cell.fspr for cell in elemap.values())
             #self.compute_spec_rad = Kernel(self._make_spec_rad(), fpts, fspr)
-            self.compute_flux = Kernel(self._make_flux(impl_op), fpts, fspr)
+            self.compute_flux = Kernel(*self._make_flux(impl_op), fpts, fspr)
         elif impl_op == 'approx-jacobian':
             # Collect array to save Jacobian
             fjmat = tuple(cell.jmat for cell in elemap.values())
-            self.compute_flux = Kernel(self._make_flux(impl_op), fpts, fjmat)
+            self.compute_flux = Kernel(*self._make_flux(impl_op), fpts, fjmat)
         else:
-            self.compute_flux = Kernel(self._make_flux(impl_op), fpts)
+            self.compute_flux = Kernel(*self._make_flux(impl_op), fpts)
 
     def _make_flux(self, impl_op):
         ndims, nfvars = self.ndims, self.nfvars
+        lidx = self.lidx
+        nf, sf = self.vec_snorm, self.mag_snorm
 
         # Compiler arguments
         array = self.be.local()
@@ -317,23 +318,20 @@ class EulerBCInters(BaseAdvecBCInters):
         # Get bc function (`self.bc` was defined at `baseadvec.inters`)
         bc = self.bc
 
-        lt, le, lf = self._lidx
-        nf, sf = self._vec_snorm, self._mag_snorm,
-
         if impl_op == 'spectral-radius':
             # Get wave speed function
             wave_speed = self.ele0.make_wave_speed()
 
-            def bc_flux_spr(i_begin, i_end, uf, lam):
+            def bc_flux_spr(i_begin, i_end, lidx, nf, sf, uf, lam):
                 for idx in range(i_begin, i_end):
-                    fn = array((nfvars,))
-                    ur = array((nfvars,))
+                    fn = array((nfvars,), np.float64)
+                    ur = array((nfvars,), np.float64)
 
                     # Normal vector
                     nfi = nf[:, idx]
 
                     # Left solutions
-                    lti, lfi, lei = lt[idx], lf[idx], le[idx]
+                    lti, lei, lfi = lidx[:, idx]
                     ul = uf[lti][lfi, :, lei]
 
                     # Compute BC
@@ -350,24 +348,24 @@ class EulerBCInters(BaseAdvecBCInters):
                         # Save it at left solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, bc_flux_spr)
+            return self.be.make_loop(self.nfpts, bc_flux_spr, lidx, nf, sf)
         elif impl_op == 'approx-jacobian':
             from pybaram.solvers.euler.jacobian import make_convective_jacobian
 
             # Get Jacobian functions
             pos_jacobian = make_convective_jacobian(self.be, cplargs, 'positive')
 
-            def bc_flux_ajac(i_begin, i_end, uf, jmats):
+            def bc_flux_ajac(i_begin, i_end, lidx, nf, sf, uf, jmats):
                 for idx in range(i_begin, i_end):
-                    fn = array((nfvars,))
-                    ur = array((nfvars,))
-                    ap = array((nfvars, nfvars))
+                    fn = array((nfvars,), np.float64)
+                    ur = array((nfvars,), np.float64)
+                    ap = array((nfvars, nfvars), np.float64)
 
                     # Normal vector
                     nfi = nf[:, idx]
 
                     # Left solutions
-                    lti, lfi, lei = lt[idx], lf[idx], le[idx]
+                    lti, lei, lfi = lidx[:, idx]
                     ul = uf[lti][lfi, :, lei]
 
                     # Compute BC
@@ -386,18 +384,18 @@ class EulerBCInters(BaseAdvecBCInters):
                         # Save it at left solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, bc_flux_ajac)
+            return self.be.make_loop(self.nfpts, bc_flux_ajac, lidx, nf, sf)
         else:
-            def bc_flux(i_begin, i_end, uf):
+            def bc_flux(i_begin, i_end, lidx, nf, sf, uf):
                 for idx in range(i_begin, i_end):
-                    fn = array((nfvars,))
-                    ur = array((nfvars,))
+                    fn = array((nfvars,), np.float64)
+                    ur = array((nfvars,), np.float64)
 
                     # Normal vector
                     nfi = nf[:, idx]
 
                     # Left solutions
-                    lti, lfi, lei = lt[idx], lf[idx], le[idx]
+                    lti, lei, lfi = lidx[:, idx]
                     ul = uf[lti][lfi, :, lei]
 
                     # Compute BC
@@ -410,7 +408,7 @@ class EulerBCInters(BaseAdvecBCInters):
                         # Save it at left solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, bc_flux)
+        return self.be.make_loop(self.nfpts, bc_flux, lidx, nf, sf)
 
 
 class EulerSupOutBCInters(EulerBCInters):

@@ -14,6 +14,7 @@ class SurfIntPlugin(BasePlugin):
     name = 'surface'
 
     def __init__(self, intg, cfg, suffix):
+        super().__init__(intg, cfg, suffix)
         self.cfg = cfg
         sect = 'soln-plugin-{}-{}'.format(self.name, suffix)
 
@@ -49,8 +50,8 @@ class SurfIntPlugin(BasePlugin):
         if suffix in bcmap:
             # Get normal vector and element index for bc
             bc = bcmap[suffix]
-            t, e, _ = bc._lidx
-            mag, vec = bc._mag_snorm, bc._vec_snorm
+            t, e, _ = bc.rawlidx
+            mag, vec = bc.raw_mag_snorm, bc.raw_vec_snorm
             
             if self._needed_xf:
                 xf = bc.xf
@@ -73,7 +74,7 @@ class SurfIntPlugin(BasePlugin):
         
         self._area = area
 
-        # Check integratro mode (steady | unsteady) and frequency to compute the plugin
+        # Check integrator mode (steady | unsteady) and frequency to compute the plugin
         self.mode = intg.mode
         if self.mode == 'steady':
             self.itout = cfg.getint(sect, 'iter-out', 100)

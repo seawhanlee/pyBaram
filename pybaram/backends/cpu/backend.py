@@ -33,8 +33,10 @@ class CPUBackend(Backend):
             # Threading layer selection
             if multithread in ['default', 'forksafe', 'threadsafe', 'safe', 'omp', 'tbb']:
                 nb.config.THREADING_LAYER = multithread
+
+        self.reduction = np.sum     # Summation reduction
     
-    def compile(self, func, outer=False):
+    def compile(self, func, outer=False, **kwargs):
         # JIT compile the Python function
         if self.multithread == 'single' or not outer:
             return nb.jit(nopython=True, fastmath=True)(func)
@@ -56,3 +58,38 @@ class CPUBackend(Backend):
             return arr
         
         return _array
+
+    def alloc_array(self, shape, dtype=np.float64, init=None, src=None, mapped=False):
+        # Compatibility for GPU backend
+        if mapped:
+            arr = np.empty(shape, dtype)
+            return arr, arr
+        if src is not None:
+            return src.astype(dtype, copy=True)      # return copy of original array
+        
+        if init is None:
+            return np.empty(shape, dtype)
+        elif init == 1:
+            return np.ones(shape, dtype)
+        elif init == 0:
+            return np.zeros(shape, dtype)
+        else:
+            return np.full(shape, init, dtype)
+    
+    def convert_array(self, array):
+        # In CPU, return Numpy array itself
+        return array
+    
+    def get_array(self, arrs, *args):
+        # Return list of arrays
+        return arrs
+    
+    def reduce_array(self, nvars):
+        def _run(array, reduced_array):
+            reduced_array[:] = np.sum(array, axis=1)
+        
+        return _run
+
+    def wait(self):
+        # Dummy function
+        pass

@@ -44,20 +44,25 @@ class BaseIntegrator:
     @property
     def curr_soln(self):
         # Return current solution array
-        return self.sys.eles.upts[self._curr_idx]
+        return self.be.get_array(
+            self.sys.eles.upts[self._curr_idx], self.sys.eles.soln
+        )
 
     @property
     def curr_aux(self):
         # Return current aux variable array
-        return self.sys.eles.aux
+        return self.be.get_array(
+            self.sys.eles.aux, self.sys.eles.rawaux
+        )
 
     @property
     def curr_mu(self):
         # Get visocisty variable (mu) vector
-        mu = self.sys.eles.mu
+        mu = self.be.get_array(self.sys.eles.mu, self.sys.eles.rawmu)
 
         if hasattr(self.sys.eles, 'mut'):
             # If turbulent viscosity (mu_t) is defined, return mu + mu_t
-            mu = ProxyList([m1 + m2 for m1, m2 in zip(mu, self.sys.eles.mut)])
+            mut = self.be.get_array(self.sys.eles.mut, self.sys.eles.rawmut)
+            mu = ProxyList([m1 + m2 for m1, m2 in zip(mu, mut)])
         
         return mu

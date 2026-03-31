@@ -23,7 +23,7 @@ class ViscousFluidElements(FluidElements):
         if viscosity == 'constant':
             mu = self._const['mu']
 
-            def compute_mu(*args):
+            def compute_mu(u):
                 # Constant viscosity
                 return mu
             
@@ -104,13 +104,13 @@ class NavierStokesElements(BaseAdvecDiffElements, ViscousFluidElements):
 
         # Aux array
         nauxvars = len(self.auxvars)
-        self.aux = aux = np.empty((nauxvars, self.neles))
+        self.rawaux = rawaux = np.empty((nauxvars, self.neles))
         
         # Assign aux variable
-        self.mu = aux[0]
+        self.rawmu = rawaux[0]
 
         if hasattr(self, "_aux"):
-            self.aux[:] = self._aux
+            self.rawaux[:] = self._aux
             delattr(self, "_aux")
             is_aux_initialized = True
         else:
@@ -118,11 +118,14 @@ class NavierStokesElements(BaseAdvecDiffElements, ViscousFluidElements):
 
         if impl_op == 'spectral-radius':
             # Spectral radius
-            self.fspr = np.empty((self.nface, self.neles))
+            self.fspr = self.be.alloc_array((self.nface, self.neles))
         elif impl_op == 'approx-jacobian':
             # Jacobian matrix on face
-            self.jmat = np.empty((2, self.nfvars, self.nfvars, \
-                                  self.nface, self.neles))
+            self.jmat = self.be.alloc_array((2, self.nfvars, self.nfvars, \
+                                             self.nface, self.neles))
+
+        self.aux = self.be.convert_array(rawaux)
+        self.mu = self.aux[0]
 
         # Update arguments of post kerenl
         self.post.update_args(self.upts_in, self.mu)
@@ -132,7 +135,7 @@ class NavierStokesElements(BaseAdvecDiffElements, ViscousFluidElements):
             self.post()
 
         # Kernel to compute timestep
-        self.timestep = Kernel(self._make_timestep(),
+        self.timestep = Kernel(*self._make_timestep(),
                                self.upts_in, self.mu, self.dt)
 
     def _make_timestep(self):
@@ -140,14 +143,16 @@ class NavierStokesElements(BaseAdvecDiffElements, ViscousFluidElements):
         ndims, nface, nfvars = self.ndims, self.nface, self.nfvars
 
         # Static variables
-        vol = self._vol
-        smag, svec = self._gen_snorm_fpts()
+        vol = self.vol
+        _smag, _svec = self._gen_snorm_fpts()
+        smag = self.be.convert_array(_smag)
+        svec = self.be.convert_array(_svec)
 
         # Constants
         gamma, pmin = self._const['gamma'], self._const['pmin']
         pr = self._const['pr']
 
-        def timestep(i_begin, i_end, u, mu, dt, cfl):
+        def timestep(i_begin, i_end, smag, svec, vol, u, mu, dt, cfl):
             for idx in range(i_begin, i_end):
                 rho = u[0, idx]
                 et = u[nfvars-1, idx]
@@ -160,7 +165,7 @@ class NavierStokesElements(BaseAdvecDiffElements, ViscousFluidElements):
                 lamc, lamv = 0.0, 0.0
                 for jdx in range(nface):
                     # Inviscid spectral radius: Wave speed abs(Vn) + c
-                    lamc += (abs(dot(u[:, idx], svec[jdx, idx], ndims, 1))/rho + c)*smag[jdx, idx]
+                    lamc += (abs(dot(u[:, idx], svec[jdx, idx], ndims, 1, 0))/rho + c)*smag[jdx, idx]
 
                     # Viscous spectral radisu: max(4/3 \gamma)/rho/(mu/pr+mut/prt)/length
                     lamv += (1/rho*max(4/3, gamma)*mu[idx]/pr*smag[jdx, idx]**2/vol[idx])
@@ -168,7 +173,7 @@ class NavierStokesElements(BaseAdvecDiffElements, ViscousFluidElements):
                 # Time step : CFL * vol / max(lam_c, C*lam_v), C=4
                 dt[idx] = cfl*vol[idx] / max(lamc, 4*lamv)
 
-        return self.be.make_loop(self.neles, timestep)
+        return self.be.make_loop(self.neles, timestep, smag, svec, vol)
 
     def make_wave_speed(self):
         # Dimensions and constants
@@ -179,7 +184,7 @@ class NavierStokesElements(BaseAdvecDiffElements, ViscousFluidElements):
         def _lambdaf(u, nf, rcp_dx, mu):
             rho, et = u[0], u[nfvars-1]
 
-            contra = dot(u, nf, ndims, 1)/rho
+            contra = dot(u, nf, ndims, 1, 0)/rho
             p = max((gamma - 1)*(et - 0.5*dot(u, u, ndims, 1, 1)/rho), pmin)
             c = np.sqrt(gamma*p/rho)
 

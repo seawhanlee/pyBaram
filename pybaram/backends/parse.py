@@ -6,7 +6,7 @@ import inspect
 _header_pattern = r'def\s(\w+)\(\s*([\w_]+)\s*,\s*([\w_]+)'
 
 
-def parse_loop(func, src='none', parallel=False):
+def parse_loop(func, src='none', parallel=False, *kwargs):
     # Obtain source
     if src == 'none':
         ftxt = inspect.getsource(func).split('\n')

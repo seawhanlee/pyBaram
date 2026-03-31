@@ -13,22 +13,26 @@ class BaseAdvecElements(BaseElements):
         self.vertex = vertex
 
         # Upts : Solution vector
-        self.upts = upts = [self._ics.copy() for i in range(nreg)]
+        self.upts = upts = [self.be.alloc_array(None, src=self._ics) for i in range(nreg)]
         del(self._ics)
 
         # Solution vector bank and assign upts index
         self.upts_in = upts_in = ArrayBank(upts, 0)
         self.upts_out = upts_out = ArrayBank(upts, 1)
 
+        # Residual vector
+        self.h_resid, self.d_resid = self.be.alloc_array((self.nvars,), mapped=True)
+        self.resid_out = self.be.alloc_array((self.nvars, self.neles), init=0)
+
         # Construct arrays for flux points, dt and derivatives of source term
-        self.fpts = fpts = np.empty((self.nface, self.nvars, self.neles))
-        self.dt = np.empty(self.neles)
-        self.dsrc = np.zeros((self.nvars, self.neles))
+        self.fpts = fpts = self.be.alloc_array((self.nface, self.nvars, self.neles))
+        self.dt = self.be.alloc_array((self.neles,))
+        self.dsrc = self.be.alloc_array((self.nvars, self.neles), init=0)
 
         if self.order > 1:
             # Array for gradient and limiter
-            self.grad = grad = np.zeros((self.ndims, self.nvars, self.neles))
-            lim = np.ones((self.nvars, self.neles))
+            self.grad = grad = self.be.alloc_array((self.ndims, self.nvars, self.neles), init=0)
+            lim = self.be.alloc_array((self.nvars, self.neles), init=1)
             limiter = self.cfg.get('solver', 'limiter', 'none')
 
             # Prepare vertex array
@@ -36,26 +40,27 @@ class BaseAdvecElements(BaseElements):
 
         # Build kernels
         # Kernel to compute flux points
-        self.compute_fpts = Kernel(self._make_compute_fpts(), upts_in, fpts)
+        self.compute_fpts = Kernel(*self._make_compute_fpts(), upts_in, fpts)
 
         # Kernel to compute divergence of solution
-        self.div_upts = Kernel(self._make_div_upts(), upts_out, fpts, upts_in)
+        self.div_upts = Kernel(*self._make_div_upts(), upts_out, fpts, upts_in)
 
         # Kernel to compute residuals
-        self.compute_resid = Kernel(self._make_compute_resid(), self.upts_out)
+        self.compute_resid = Kernel(*self._make_compute_resid(), self.upts_out, self.resid_out)
+        self.reduce_resid = Kernel(self.be.reduce_array(self.nvars), self.resid_out, self.d_resid)
 
         if self.order > 1:
             # Kernel to compute gradient
-            self.compute_grad = Kernel(self._make_grad(), fpts, grad)
+            self.compute_grad = Kernel(*self._make_grad(), fpts, grad)
 
             # Kernel for linear reconstruction
             self.compute_recon = Kernel(
-                self._make_recon(), upts_in, grad, lim, fpts)
+                *self._make_recon(), upts_in, grad, lim, fpts)
 
             if limiter != 'none':
                 # Kenerl to compute slope limiter (MLP-u)
                 self.compute_mlp_u = Kernel(
-                    self._make_mlp_u(limiter), upts_in, grad, vpts, lim)
+                    *self._make_mlp_u(limiter), upts_in, grad, vpts, lim)
             else:
                 self.compute_mlp_u = NullKernel
         else:
@@ -64,26 +69,18 @@ class BaseAdvecElements(BaseElements):
             self.compute_mlp_u = NullKernel
 
         # Kernel to post-process
-        self.post = Kernel(self._make_post(), upts_in)
+        self.post = Kernel(*self._make_post(), upts_in)
 
     def _make_compute_resid(self):
-        # TODO: Directly use numba, need to implement within backend or Numpy
-        import numba as nb
+        vol = self.vol
+        nvars = self.nvars
 
-        vol = self._vol
-        neles, nvars = self.neles, self.nvars
-
-        def run(upts):
-            resid = np.empty(nvars)
-            for j in range(nvars):
-                s = 0
-                for i in nb.prange(neles):
-                    s += upts[j,i]**2*vol[i]
-                resid[j] = s
-
-            return resid
-
-        return self.be.compile(run, outer=True)
+        def _compute_resid(i_begin, i_end, vol, upts, resid_out):
+            for idx in range(i_begin, i_end):
+                for jdx in range(nvars):
+                    resid_out[jdx, idx] = upts[jdx, idx]**2 * vol[idx]
+        
+        return self.be.make_loop(self.neles, _compute_resid, vol)
 
     def _make_compute_fpts(self):
         nvars, nface = self.nvars, self.nface
@@ -100,7 +97,9 @@ class BaseAdvecElements(BaseElements):
 
     def _make_div_upts(self):
         # Global variables for compile
-        gvars = {"np": np, "rcp_vol": self.rcp_vol}
+        rcp_vol = self.be.convert_array(self.rcp_vol)
+        xcT = self.be.convert_array(self.xc.T)
+        gvars = {"np": np, "rcp_vol": rcp_vol}
 
         # Position, constants and numerical functions
         subs = {x: 'xc[{0}, idx]'.format(i)
@@ -119,11 +118,11 @@ class BaseAdvecElements(BaseElements):
 
         # Parse xc in source term
         if any([re.search(r'xc\[.*?\]', s) for s in src]):
-            gvars.update({"xc": self.xc.T})
+            gvars.update({"xc": xcT})
 
         # Construct function text
         f_txt = (
-            f"def _div_upts(i_begin, i_end, rhs, fpts, upts, t=0):\n"
+            f"def _div_upts(i_begin, i_end, rcp_vol, xc, rhs, fpts, upts, t=0):\n"
             f"    for idx in range(i_begin, i_end): \n"
             f"        rcp_voli = rcp_vol[idx]\n"
         )
@@ -138,15 +137,16 @@ class BaseAdvecElements(BaseElements):
         exec(f_txt, gvars, lvars)
 
         # Compile the funtion
-        return self.be.make_loop(self.neles, lvars["_div_upts"], src=f_txt)
+        return self.be.make_loop(self.neles, lvars["_div_upts"],
+                                 rcp_vol, xcT, src=f_txt)
 
     def _make_grad(self):
         nface, ndims, nvars = self.nface, self.ndims, self.nvars
 
         # Gradient operator 
-        op = self._prelsq
+        op = self.be.convert_array(self._prelsq)
 
-        def _cal_grad(i_begin, i_end, fpts, grad):
+        def _cal_grad(i_begin, i_end, op, fpts, grad):
             # Elementwise dot product
             # TODO: Reduce accesing global array
             for i in range(i_begin, i_end):
@@ -158,15 +158,15 @@ class BaseAdvecElements(BaseElements):
                         grad[k, l, i] = tmp
 
         # Compile the function
-        return self.be.make_loop(self.neles, _cal_grad)       
+        return self.be.make_loop(self.neles, _cal_grad, op)       
 
     def _make_recon(self):
         nface, ndims, nvars = self.nface, self.ndims, self.nvars
 
         # Displacement vector
-        op = self.dxf
+        op = self.be.convert_array(self.dxf)
 
-        def _cal_recon(i_begin, i_end, upts, grad, lim, fpts):
+        def _cal_recon(i_begin, i_end, op, upts, grad, lim, fpts):
             # Elementwise dot product and scale with limiter
             # TODO: Reduce accesing global array
             for i in range(i_begin, i_end):
@@ -177,13 +177,13 @@ class BaseAdvecElements(BaseElements):
                             tmp += op[k, j, i]*grad[j, l, i]
                         fpts[k, l, i] = upts[l, i] + lim[l, i]*tmp
 
-        return self.be.make_loop(self.neles, _cal_recon)
+        return self.be.make_loop(self.neles, _cal_recon, op)
 
     def _make_mlp_u(self, limiter):
         nvtx, ndims, nvars = self.nvtx, self.ndims, self.nvars
 
-        dx = self.dxv
-        cons = self._vcon.T
+        dx = self.be.convert_array(self.dxv)
+        cons = self.be.convert_array(self._vcon.T)
 
         def u1(dup, dum, ee2):
             # u1 function
@@ -197,7 +197,7 @@ class BaseAdvecElements(BaseElements):
             return ((dup2 + ee2)*dum + 2*dum2*dup)/(dup2 + 2*dum2 + dupm + ee2)/dum
 
         # x_i^1.5 : Characteristic length for u2 function
-        le32 = self.le**1.5
+        le32 = self.be.convert_array(self.le**1.5)
 
         if limiter == 'mlp-u2':
             is_u2 = True
@@ -213,7 +213,7 @@ class BaseAdvecElements(BaseElements):
             u2k = 0.0
             limf = self.be.compile(u1)
 
-        def _cal_mlp_u(i_begin, i_end, upts, grad, vext, lim):
+        def _cal_mlp_u(i_begin, i_end, cons, dx, le32, upts, grad, vext, lim):
             for i in range(i_begin, i_end):
                 for j in range(nvtx):
                     vi = cons[j, i]
@@ -247,7 +247,7 @@ class BaseAdvecElements(BaseElements):
                         else:
                             lim[k, i] = min(lim[k, i], limj)
 
-        return self.be.make_loop(self.neles, _cal_mlp_u)
+        return self.be.make_loop(self.neles, _cal_mlp_u, cons, dx, le32)
 
     def _make_post(self):
         # Get post-process function
