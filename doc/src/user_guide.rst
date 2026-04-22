@@ -66,11 +66,20 @@ When you run ``pybaram``, following help output is given::
         user@Computer ~/pyBaram$ pybaram restart mesh.pbrm sol-100.pbrs
 
 5. ``pybaram export`` --- Convert solution files to `VTK <https://vtk.org/>`_ unstructured grid file (``.vtu``) 
-   or `Tecplot <https://www.tecplot.com/>`_ data file (``.plt``).
+   or `Tecplot <https://www.tecplot.com/>`_ data file (``.plt``). In addition to volume export, this command can
+   export solution data on a specified surface boundary and print the list of available surface names in the mesh.
 
    Example::
         
         user@Computer ~/pyBaram$ pybaram export mesh.pbrm sol-100.pbrs out.vtu
+
+   Export solution data on one or more surface boundaries. For multiple boundaries, use a comma-separated list with ``-s``::
+
+        user@Computer ~/pyBaram$ pybaram export mesh.pbrm sol-100.pbrs surf.vtu -s wall,inlet,outlet
+
+   Print available surface names::
+
+        user@Computer ~/pyBaram$ pybaram export mesh.pbrm --list-surfaces
 
 
 Mesh File
