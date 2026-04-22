@@ -19,11 +19,12 @@ class VTKWriter(BaseWriter):
         vtyp = self._vtu_typ()
         soln, aux = self._soln
 
+        primevars = self._elms.primevars
+
         if self.ndims == 2:
             # Pad zero column vector for z-dir velocity
-            soln = np.pad(soln, [(0, 1), (0, 0)])
-
-        primevars = self._elms.primevars
+            soln = np.insert(soln, 4, 0, axis=0)
+            primevars.insert(4, 'w')
 
         if aux is not None:
             auxvars = self._elms.auxvars
