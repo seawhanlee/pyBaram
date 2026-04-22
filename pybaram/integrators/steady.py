@@ -289,7 +289,7 @@ class FiveStageRK(BaseSteadyIntegrator):
 
 class LUSGS(BaseSteadyIntegrator):
     name = 'lu-sgs'
-    nreg = 3
+    nreg = 2
     impl_op = 'spectral-radius'
 
     def construct_stages(self):
@@ -325,12 +325,12 @@ class LUSGS(BaseSteadyIntegrator):
             lsweeps = Kernel(
                 *be.make_loop(ele.neles, _lsweep,
                               fnorm_vol, vec_fnorm, nei_ele),
-                ele.upts[0], ele.upts[1], ele.upts[2], diag, ele.dsrc, ele.fspr
+                ele.upts[0], ele.upts[1], diag, ele.dsrc, ele.fspr
             )
             usweeps = Kernel(
                 *be.make_loop(ele.neles, _usweep,
                               fnorm_vol, vec_fnorm, nei_ele),
-                ele.upts[0], ele.upts[1], ele.upts[2], diag, ele.dsrc, ele.fspr
+                ele.upts[0], ele.upts[1], diag, ele.dsrc, ele.fspr
             )
 
             kernels = [pre_lusgs, lsweeps, usweeps]
@@ -354,11 +354,11 @@ class LUSGS(BaseSteadyIntegrator):
                 )
                 tlsweeps = Kernel(
                     *be.make_loop(ele.neles, _tlsweep, fnorm_vol, vec_fnorm, nei_ele),
-                    ele.upts[0], ele.upts[1], ele.upts[2], diag, ele.dsrc, ele.tfspr
+                    ele.upts[0], ele.upts[1], diag, ele.dsrc, ele.tfspr
                 )
                 tusweeps = Kernel(
                     *be.make_loop(ele.neles, _tusweep, fnorm_vol, vec_fnorm, nei_ele),
-                    ele.upts[0], ele.upts[1], ele.upts[2], diag, ele.dsrc, ele.tfspr
+                    ele.upts[0], ele.upts[1], diag, ele.dsrc, ele.tfspr
                 )
 
                 kernels += [pre_tlusgs, tlsweeps, tusweeps]             
@@ -383,7 +383,7 @@ class LUSGS(BaseSteadyIntegrator):
 
 class ColoredLUSGS(BaseSteadyIntegrator):
     name = 'colored-lu-sgs'
-    nreg = 3
+    nreg = 2
     impl_op = 'spectral-radius'
 
     def construct_stages(self):
@@ -423,14 +423,14 @@ class ColoredLUSGS(BaseSteadyIntegrator):
             
             lsweeps = [
                 Kernel(*be.make_loop(ne, _lsweep, fnorm_vol, vec_fnorm, nei_ele, icolor, lev_color, n0=n0),
-                       ele.upts[0], ele.upts[1], ele.upts[2], diag, ele.dsrc, ele.fspr
+                       ele.upts[0], ele.upts[1], diag, ele.dsrc, ele.fspr
                 )
                 for n0, ne in zip(ncolor[:-1], ncolor[1:])
             ]
 
             usweeps = [
                 Kernel(*be.make_loop(ne, _usweep, fnorm_vol, vec_fnorm, nei_ele, icolor, lev_color, n0=n0),
-                       ele.upts[0], ele.upts[1], ele.upts[2], diag, ele.dsrc, ele.fspr
+                       ele.upts[0], ele.upts[1], diag, ele.dsrc, ele.fspr
                 ) 
                 for n0, ne in zip(ncolor[::-1][1:], ncolor[::-1][:-1])
             ]
@@ -455,14 +455,14 @@ class ColoredLUSGS(BaseSteadyIntegrator):
 
                 tlsweeps = [
                     Kernel(*be.make_loop(ne, _tlsweep, fnorm_vol, vec_fnorm, nei_ele, icolor, lev_color, n0=n0),
-                           ele.upts[0], ele.upts[1], ele.upts[2], diag, ele.dsrc, ele.tfspr
+                           ele.upts[0], ele.upts[1], diag, ele.dsrc, ele.tfspr
                     )
                     for n0, ne in zip(ncolor[:-1], ncolor[1:])
                 ]
 
                 tusweeps = [
                     Kernel(*be.make_loop(ne, _tusweep, fnorm_vol, vec_fnorm, nei_ele, icolor, lev_color, n0=n0),
-                           ele.upts[0], ele.upts[1], ele.upts[2], diag, ele.dsrc, ele.tfspr
+                           ele.upts[0], ele.upts[1], diag, ele.dsrc, ele.tfspr
                     )
                     for n0, ne in zip(ncolor[::-1][1:], ncolor[::-1][:-1])
                 ] 
