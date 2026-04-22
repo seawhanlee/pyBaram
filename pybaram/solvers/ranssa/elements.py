@@ -13,7 +13,7 @@ class RANSSAFluidElements(ViscousFluidElements):
 
     @property
     def auxvars(self):
-        return ['ydns', 'mu', 'mut']
+        return ['ydist', 'mu', 'mut']
 
     @property
     def primevars(self):

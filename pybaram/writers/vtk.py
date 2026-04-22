@@ -7,9 +7,14 @@ from pybaram.writers.base import BaseWriter
 
 class VTKWriter(BaseWriter):
     name = 'vtu'
-    _vtk_types = dict(tri=5, quad=9, tet=10, pyr=14, pri=13, hex=12)
+    _vtk_types = dict(line=4, tri=5, quad=9, tet=10, pyr=14, pri=13, hex=12)
     _is_cstyle = True
-    _var_names = {'rho': 'Density', 'u': 'Velocity', 'p': 'Pressure'}
+    _var_names = {
+        'rho': 'Density', 'uvw': 'Velocity', 'p': 'Pressure',
+        'uv' : 'Velocity',
+        'n' : 'Normal', 'wsr' : 'WallShearRate',
+        'ydist' : 'WallDistance'
+        }
 
     def _raw_write(self):
         # Data
@@ -17,16 +22,12 @@ class VTKWriter(BaseWriter):
         cons = self._vtu_con()
         voff = self._vtu_off()
         vtyp = self._vtu_typ()
-        soln, aux = self._soln
+        sname, sdata, vname, vdata = self._soln
 
         if self.ndims == 2:
-            # Pad zero column vector for z-dir velocity
-            soln = np.pad(soln, [(0, 1), (0, 0)])
-
-        primevars = self._elms.primevars
-
-        if aux is not None:
-            auxvars = self._elms.auxvars
+            for i in range(len(vname)):
+                # Pad zero column vector for z-dir component
+                vdata = np.insert(vdata, 3*i+2, 0, axis=0)
 
         # Write
         with open(self._outf, 'wb') as fp:
@@ -55,25 +56,22 @@ class VTKWriter(BaseWriter):
 
             # Header for cell data
             self._write_str('\n<CellData>', fp)
-            for pv in primevars:
-                if pv == 'u':
-                    off = self._write_arr_header(
-                        fp, 'Velocity', 3, off, 3*voff.nbytes)
-                elif pv in ['v', 'w']:
-                    pass
+            for sn in sname:
+                if sn in self._var_names:
+                    name = self._var_names[sn]
                 else:
-                    if pv in self._var_names:
-                        vname = self._var_names[pv]
-                    else:
-                        vname = pv
+                    name = sn
 
-                    off = self._write_arr_header(
-                        fp, vname, 1, off, voff.nbytes)
+                off = self._write_arr_header(
+                        fp, name, 1, off, voff.nbytes)
+                
+            for vn in vname:
+                if vn in self._var_names:
+                    name = self._var_names[vn]
 
-            if aux is not None:
-                for av in auxvars:
-                    off = self._write_arr_header(fp, av, 1, off, voff.nbytes)
-
+                off = self._write_arr_header(
+                        fp, name, 3, off, 3*voff.nbytes)
+                
             self._write_str('\n</CellData>', fp)
 
             self._write_str('\n</Piece>\n</UnstructuredGrid>', fp)
@@ -84,18 +82,13 @@ class VTKWriter(BaseWriter):
             self._write_darray(voff, np.int32, fp)
             self._write_darray(vtyp, np.uint8, fp)
 
-            for i, pv in enumerate(primevars):
-                if pv == 'u':
-                    self._write_darray(
-                        soln[i:i+3].swapaxes(0, 1), np.float32, fp)
-                elif pv in ['v', 'w']:
-                    pass
-                else:
-                    self._write_darray(soln[i], np.float32, fp)
-
-            if aux is not None:
-                for i in range(len(auxvars)):
-                    self._write_darray(aux[i], np.float32, fp)
+            for i in range(len(sname)):
+                self._write_darray(sdata[i], np.float32, fp)
+            
+            for i in range(len(vname)):
+                self._write_darray(
+                    vdata[3*i:3*(i+1)].swapaxes(0, 1), np.float32, fp
+                    )
 
             self._write_str('\n</AppendedData>\n</VTKFile>', fp)
 

@@ -53,15 +53,32 @@ def partition_mesh(inmesh, outmesh, npart, solns=[]):
     get_partition(msh, outmesh, npart, solns)
 
 
-def export_soln(mesh, soln, out):
+def export_soln(meshf, solnf, out, bcs, is_list=False):
     """
     Export solution to visualization file
 
     :param string mesh: pyBaram mesh file
     :param string soln: pyBaram solution file
     :param string out: exported file for visualization
+    :param string bcs: surface to extracted
+    :param string is_list: list boundary surfaces
     """
-    # Get writer
-    writer = get_writer(mesh, soln, out)
+    mesh = NativeReader(meshf)
 
-    writer.write()
+    if is_list:
+        # List boundary surface
+        surfs = set(k.split('_')[1] for k in mesh if k.startswith('bcon'))
+        for n in surfs:
+            print(n)
+    else:
+        soln = NativeReader(solnf)
+
+        # Check solution and mesh are compatible
+        if mesh['mesh_uuid'] != soln['mesh_uuid']:
+            raise RuntimeError(
+                'Solution {} was not computed on mesh {}'.format(solnf, meshf))
+
+        # Get writer
+        writer = get_writer(mesh, soln, out, bcs=bcs)
+
+        writer.write()

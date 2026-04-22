@@ -16,7 +16,10 @@ def process_part(args):
 
 
 def process_export(args):
-    export_soln(args.mesh, args.soln, args.out)
+    export_soln(
+        args.mesh, args.soln, args.out, 
+        args.surface, args.list_surfaces
+        )
 
 
 def process_run(args):
@@ -79,9 +82,22 @@ def main():
     # Export command
     ap_export = sp.add_parser('export', help='export --help')
     ap_export.add_argument('mesh', help='mesh file')
-    ap_export.add_argument('soln', help='solution file')
-    ap_export.add_argument('out', help='output file')
+    ap_export.add_argument('soln', nargs='?', help='solution file')
+    ap_export.add_argument('out', nargs='?', help='output file')
     ap_export.set_defaults(process=process_export)
+
+    # surface option
+    ap_export.add_argument(
+        "-s", "--surface",
+        type=str,
+        help='Export surface data by boundary name; use commas to specify multiple boundaries (e.g., wall or wall,inlet)'
+    )
+
+    ap_export.add_argument(
+        "--list-surfaces",
+        action="store_true",
+        help="List available surface names in mesh"
+    )
 
     # Parse the arguments
     args = ap.parse_args()
