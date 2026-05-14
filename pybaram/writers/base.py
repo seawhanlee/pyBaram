@@ -119,6 +119,9 @@ class BaseWriter(object):
         sdata = defaultdict(list)
         vdata = defaultdict(list)
 
+        # Check Viscous flow or not
+        is_viscous = hasattr(fluid, "mu_container")
+
         for rank, bcon in bcons.items():
             for etype in np.unique(bcon['f0']):
                 fluid.ndims = self._petype_ndim[etype]
@@ -126,7 +129,9 @@ class BaseWriter(object):
                 # Get element and  associated solution, aux data
                 spt = mesh['spt_{}_p{}'.format(etype, rank)]
                 sol = soln['soln_{}_p{}'.format(etype, rank)]
-                aux = soln['aux_{}_p{}'.format(etype, rank)]
+
+                if is_viscous:
+                    aux = soln['aux_{}_p{}'.format(etype, rank)]
 
                 # Element object
                 ele = BaseElements(None, cfg, etype, spt)
@@ -154,23 +159,29 @@ class BaseWriter(object):
                     prime = fluid.conv_to_prim(sol[:, eidx_f], cfg)
                     rho, p, uvw = prime[0], prime[1], np.array(prime[2:2+fluid.ndims])
 
-                    # Aux variables
-                    aux = aux[:, eidx_f]
-
-                    # Distance between cell center and face center
-                    dx = ele.xf[fidx_f, eidx_f] - ele.xc[eidx_f]
-                    dxn = np.einsum('ij,ji->j', vec_fnorm, dx)
-
-                    # Tangential velocity
-                    vt = uvw - np.einsum('ij,ij->j', vec_fnorm, uvw)*vec_fnorm
-                    trac_vel = vt/dxn
-
+                    # Extract elements
                     elms[ftype].append(elm[eidx_f][:, fe])
-                    sdata[ftype].append(np.vstack([
-                        rho, p, *aux
-                    ]))
-                    vdata[ftype].append(np.vstack([mag_fnorm*vec_fnorm, trac_vel]))
-        
+
+                    if is_viscous:
+                        # Aux variables
+                        aux = aux[:, eidx_f]
+
+                        # Distance between cell center and face center
+                        dx = ele.xf[fidx_f, eidx_f] - ele.xc[eidx_f]
+                        dxn = np.einsum('ij,ji->j', vec_fnorm, dx)
+
+                        # Tangential velocity
+                        vt = uvw - np.einsum('ij,ij->j', vec_fnorm, uvw)*vec_fnorm
+                        trac_vel = vt/dxn
+
+                        # Save pressure, viscosity and tracion velocity
+                        sdata[ftype].append(np.vstack([rho, p, *aux]))
+                        vdata[ftype].append(np.vstack([mag_fnorm*vec_fnorm, trac_vel]))
+                    else:
+                        # Save pressure for inviscid flow
+                        sdata[ftype].append(np.vstack([rho, p]))
+                        vdata[ftype].append(np.vstack([mag_fnorm*vec_fnorm]))
+
         self.ndims = fluid.ndims
 
         # Merge data for face type
@@ -178,8 +189,12 @@ class BaseWriter(object):
         sdata = np.hstack([np.hstack(sdata[k]) for k in sorted(sdata)])
         vdata = np.hstack([np.hstack(vdata[k]) for k in sorted(vdata)])
 
-        snames = ['rho', 'p'] + fluid.auxvars
-        vnames = ['n', 'wsr']
+        snames = ['rho', 'p'] 
+        vnames = ['n']
+
+        if is_viscous:
+            snames += fluid.auxvars
+            vnames += ['wsr']
         
         # Compress nodes (only containing used vtx)
         used_vtx = np.sort(np.unique(np.concatenate([
