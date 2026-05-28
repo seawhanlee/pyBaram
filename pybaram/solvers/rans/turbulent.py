@@ -10,8 +10,8 @@ def make_vorticity(be, cplargs):
     if ndims == 2:
         def vorticity(uc, gc):
             inv_rho = 1/uc[0]
-            u = uc[1] / inv_rho
-            v = uc[2] / inv_rho
+            u = uc[1] * inv_rho
+            v = uc[2] * inv_rho
 
             rho_x = gc[0][0]
             rho_y = gc[1][0]
