@@ -164,7 +164,7 @@ class BaseWriter(object):
 
                     if is_viscous:
                         # Aux variables
-                        aux = aux[:, eidx_f]
+                        auxf = aux[:, eidx_f]
 
                         # Distance between cell center and face center
                         dx = ele.xf[fidx_f, eidx_f] - ele.xc[eidx_f]
@@ -175,7 +175,7 @@ class BaseWriter(object):
                         trac_vel = vt/dxn
 
                         # Save pressure, viscosity and tracion velocity
-                        sdata[ftype].append(np.vstack([rho, p, *aux]))
+                        sdata[ftype].append(np.vstack([rho, p, *auxf]))
                         vdata[ftype].append(np.vstack([mag_fnorm*vec_fnorm, trac_vel]))
                     else:
                         # Save pressure for inviscid flow
