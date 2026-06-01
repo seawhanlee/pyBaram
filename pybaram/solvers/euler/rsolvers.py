@@ -614,3 +614,92 @@ def make_ausmpup(cplargs):
         fn[nvars - 1] = cmid*(mp*ul[0]*hl + mm*ur[0]*hr)
 
     return rsolver
+
+
+def make_ausmzc(cplargs):
+    array = cplargs['array']
+    ndims, nvars, gamma = cplargs['ndims'], cplargs['nfvars'], cplargs['gamma']
+    to_primevars = cplargs['to_primevars']
+
+    alpha = 0.0
+
+    def rsolver(ul, ur, nf, fn):
+        vl, vr = array((ndims,), np.float64), array((ndims,), np.float64)
+        pl = to_primevars(ul, vl)
+        pr = to_primevars(ur, vr)
+
+        vtl = np.sqrt(dot(vl, vl, ndims, 0, 0) + eps)
+        vtr = np.sqrt(dot(vr, vr, ndims, 0, 0) + eps)
+
+        cl = np.sqrt(gamma*pl / ul[0])
+        cr = np.sqrt(gamma*pr / ur[0])
+
+        # Speed of sound at midpoint, mach number (total)
+        mtl = vtl / cl
+        mtr = vtr / cr
+        mtm = 0.5*(mtl + mtr)
+
+        # Weighted average
+        k1, k2 = 15, 0.45
+        z = 0.5*(np.tanh(k1*(mtm-k2))+1.0)
+        fc = 1 - (1 - min(ul[0]/ur[0], ur[0]/ul[0])**3)*min(pl/pr,pr/pl)**3
+        z *= fc
+
+        # Specific enthalpy and contra velocity for left / right
+        hl = (ul[nvars-1] + pl)/ul[0]
+        hr = (ur[nvars-1] + pr)/ur[0]
+
+        contral = dot(vl, nf, ndims, 0, 0)
+        contrar = dot(vr, nf, ndims, 0, 0)
+
+        # Critical speed of sound
+        csl2 = 2.0*(gamma - 1)/(gamma + 1)*hl
+        csr2 = 2.0*(gamma - 1)/(gamma + 1)*hr
+
+        ccl = csl2/max(abs(contral), np.sqrt(csl2))
+        ccr = csr2/max(abs(contrar), np.sqrt(csr2))
+
+        # Speed of sound at midpoint, mach number
+        cmid = 0.5*(ccl + ccr)
+
+        ml = contral/cmid
+        mr = contrar/cmid
+
+        # AUSM-type function
+        if abs(ml) < 1.0:
+            mlp = 0.25*(ml + 1.0)**2
+            plp = mlp*(2.0 - ml) + alpha*ml*(ml**2 - 1.0)**2
+            #mlp += beta*(ml**2 - 1.0)**2
+        else:
+            mlp = 0.5*(ml + abs(ml))
+            plp = mlp / ml
+
+        if abs(mr) < 1.0:
+            mrm = -0.25*(mr - 1.0)**2
+            prm = -mrm*(2.0 + mr) - alpha*mr*(mr**2 - 1.0)**2
+            #mrm -= beta*(mr**2 - 1.0)**2
+        else:
+            mrm = 0.5*(mr - abs(mr))
+            prm = mrm / mr
+
+        m_mid = (mlp + mrm)
+        p_mid = plp*pl + prm*pr
+
+        # M+. M-
+        if m_mid > 0.0:
+            mp = mlp + (1-z)*mrm
+            mm = z*mrm
+        else:
+            mp = z*mlp
+            mm = (1-z)*mlp + mrm
+
+        # Flux
+        for jdx in range(nvars - 1):
+            fn[jdx] = cmid*(mp*ul[jdx] + mm*ur[jdx])
+
+        for jdx in range(ndims):
+            fn[jdx + 1] += nf[jdx] * p_mid
+
+        fn[nvars - 1] = cmid*(mp*ul[0]*hl + mm*ur[0]*hr)
+
+    return rsolver
