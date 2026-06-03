@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
+from mpi4py import MPI
 from pybaram.solvers.base.system import BaseSystem
 from pybaram.solvers.baseadvec import BaseAdvecElements, BaseAdvecIntInters, BaseAdvecMPIInters, BaseAdvecBCInters, BaseAdvecVertex
+
+import numpy as np
 
 
 class BaseAdvecSystem(BaseSystem):
@@ -11,7 +14,14 @@ class BaseAdvecSystem(BaseSystem):
     _mpiinters_cls = BaseAdvecMPIInters
     _vertex_cls = BaseAdvecVertex
 
-    def rhside(self, idx_in=0, idx_out=1, t=0, is_norm=False):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # Get reciprocal of total volume for L2 residual normalization
+        voli = sum(self.eles.tot_vol)
+        self.rcp_vol = 1/self._comm.allreduce(voli, op=MPI.SUM)
+        
+    def rhside(self, idx_in=0, idx_out=1, t=0):
         # Adjust Banks
         self.eles.upts_in.idx = idx_in
         self.eles.upts_out.idx = idx_out
@@ -82,18 +92,24 @@ class BaseAdvecSystem(BaseSystem):
         # Compute divergence
         self.eles.div_upts(t)
 
-        if is_norm:
-            # Compute residual if requested
-            self.eles.compute_resid()
-            self.eles.reduce_resid()
+    def residual(self, idx_out=1, idx_res=0):
+        # Adjust output bank
+        self.eles.upts_res.idx = idx_out
+        self.eles.resid_out.idx = idx_res
 
-            # Wait for the mapped memory reduction
-            self.be.wait()
-            resid = sum(self.eles.h_resid)
-            
-            return resid
-        else:
-            return 'none'
+        # Compute residual from the current right hand side
+        self.eles.compute_resid()
+        
+        # Collect L2-norm residual over all domains
+        return self.reduce_residual()
+
+    def reduce_residual(self):
+        self.eles.reduce_resid()
+
+        # Collect L2-norm residual over all domains
+        self.be.wait()
+        resid = self._comm.allreduce(sum(self.eles.h_resid), op=MPI.SUM)
+        return np.sqrt(resid * self.rcp_vol)
 
     def spec_rad(self):
         # Compute solution at flux point (face center)

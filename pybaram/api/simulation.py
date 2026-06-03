@@ -61,12 +61,18 @@ def _common(msh, soln, cfg, backend, comm):
 
     # Add progress bar
     if comm.rank == 0:
-        if integrator.mode == 'unsteady':
+        if integrator.mode in ('unsteady', 'unsteady-dts'):
+            tend = getattr(integrator, 'tend', integrator.tlist[-1])
             pb = tqdm(
-                total=integrator.tlist[-1], initial=integrator.tcurr,
+                total=tend, initial=integrator.tcurr,
                 unit_scale=True)
 
-            def callb(intg): return pb.update(intg.dt)
+            tprev = [integrator.tcurr]
+
+            def callb(intg):
+                dt = min(intg.tcurr, tend) - tprev[0]
+                tprev[0] = intg.tcurr
+                return pb.update(max(dt, 0.0))
         else:
             pb = tqdm(total=integrator.itermax, initial=integrator.iter)
 

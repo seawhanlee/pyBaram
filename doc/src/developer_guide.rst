@@ -13,8 +13,20 @@ Integrators
 -----------
 The Integrator object conducts time integration of the discretized equations. When the ``integrator`` is initiated, it invokes the `system` class in the :mod:`pybaram.solvers` module to compute the right-hand side term of the FVM. Additionally, plugins are invoked by this integrator object for post-processing.
 
-``pybaram`` can conduct both steady and unsteady simulations, and they are implemented
-in the :mod:`pybaram.integrators.steady` and the :mod:`pybaram.integrators.unsteady` modules, respectively. Here, the `construct_stage` method assembles and compiles the kernels required for each stage of the time-integration scheme. For unsteady simulation, explicit Runge-Kutta schemes can be applied, as implemented below.
+``pybaram`` selects the concrete integrator from ``mode`` and ``stepper`` in
+``[solver-time-integrator]``. The mode determines the base class:
+:mod:`pybaram.integrators.unsteady` for explicit physical-time integration,
+:mod:`pybaram.integrators.steady` for steady iteration, and
+:mod:`pybaram.integrators.dts` for unsteady dual-time stepping. The selected
+class then constructs the kernels required by its stages or relaxation
+solver.
+
+Unsteady Integrators
+********************
+For ``mode = unsteady``, the physical solution is advanced directly by an
+explicit time-integration scheme. The ``BaseUnsteadyIntegrator`` controls the
+physical-time list, restart time, time-step controller, and plugin callbacks.
+Concrete steppers assemble their stage kernels in ``construct_stages``.
 
 .. admonition:: TVD-RK3
    :class: dropdown
@@ -26,7 +38,13 @@ in the :mod:`pybaram.integrators.steady` and the :mod:`pybaram.integrators.unste
         :private-members:
 
 
-For steady simulation, either explicit Runge-Kutta schemes or implicit LU-SGS schemes can be used, as implemented below.
+Steady Integrators
+******************
+For ``mode = steady``, the integrator iterates until either ``max-iter`` is
+reached or the selected residual drops below ``tolerance``. Explicit steady
+steppers use local pseudo time steps and Runge-Kutta-like stage kernels. The
+implicit steady steppers are thin wrappers around the shared relaxation
+solvers in :mod:`pybaram.integrators.relaxation`.
 
 .. admonition:: 5-stage Runge-Kutta
    :class: dropdown
@@ -55,15 +73,6 @@ For steady simulation, either explicit Runge-Kutta schemes or implicit LU-SGS sc
         :inherited-members:
         :private-members:
 
-.. admonition:: Block Jacobi
-   :class: dropdown
-
-    .. autoclass:: pybaram.integrators.steady.BlockJacobi
-      :members:
-      :undoc-members:
-      :inherited-members:
-      :private-members:
-
 .. admonition:: Block LU-SGS
    :class: dropdown
 
@@ -83,13 +92,120 @@ For steady simulation, either explicit Runge-Kutta schemes or implicit LU-SGS sc
       :private-members:
 
 
+Dual-Time Stepping Integrators
+******************************
+For ``mode = unsteady-dts``, physical time is advanced with a fixed ``dt``,
+while each physical step is solved by pseudo-time sub-iterations. The
+``BaseDTSIntegrator`` manages the physical-time loop, BDF solution history,
+pseudo-time CFL, sub-iteration convergence, and restart indices. The concrete
+BDF classes define the BDF coefficients and assemble the source term for the
+pseudo-steady problem.
+
+Higher-order BDF DTS steppers start with lower-order formulas until enough
+physical-time solution history is available. Thus ``bdf2`` uses BDF1 for the
+first physical step and then BDF2, while ``bdf3`` uses BDF1, then BDF2, and
+then BDF3. When a restart file records the completed physical-step counter,
+this startup order is preserved across restart.
+
+The pseudo-time solve itself is not implemented in the DTS classes. Instead,
+``BaseDTSIntegrator`` selects a relaxation solver from
+``[solver-time-relaxation]`` and calls it at each sub-iteration.
+
+.. admonition:: BDF1 Dual-Time Stepping
+   :class: dropdown
+
+    .. autoclass:: pybaram.integrators.dts.BDF1DTSIntegrator
+        :members:
+        :undoc-members:
+        :inherited-members:
+        :private-members:
+
+.. admonition:: BDF2 Dual-Time Stepping
+   :class: dropdown
+
+    .. autoclass:: pybaram.integrators.dts.BDF2DTSIntegrator
+        :members:
+        :undoc-members:
+        :inherited-members:
+        :private-members:
+
+.. admonition:: BDF3 Dual-Time Stepping
+   :class: dropdown
+
+    .. autoclass:: pybaram.integrators.dts.BDF3DTSIntegrator
+        :members:
+        :undoc-members:
+        :inherited-members:
+        :private-members:
+
+
+Relaxation Solvers
+******************
+Relaxation solvers are implemented in
+:mod:`pybaram.integrators.relaxation` and are shared by steady implicit
+integrators and dual-time stepping integrators. The ``get_relaxation`` helper
+selects a subclass of ``BaseRelaxation`` from the configuration and attaches
+the relaxation solver to the owning integrator.
+
+For steady simulations, ``SteadyRelaxationIntegrator`` passes the steady
+stepper name directly to ``get_relaxation``. For ``unsteady-dts``
+simulations, ``BaseDTSIntegrator`` reads the relaxation method from
+``[solver-time-relaxation]``. In both cases, the relaxation object builds the
+LU-SGS or block LU-SGS kernels and its ``step`` method computes the
+right-hand side, performs the relaxation sweeps, updates the solution, and
+applies post-processing.
+
+Scalar LU-SGS relaxation uses ``spectral-radius`` as the implicit operator.
+Block LU-SGS relaxation uses ``approx-jacobian`` and can perform inner
+sub-iterations for the block correction. Colored variants use element
+coloring to schedule the sweeps by color levels.
+
+.. admonition:: LU-SGS Relaxation
+   :class: dropdown
+
+    .. autoclass:: pybaram.integrators.relaxation.LUSGSRelaxation
+        :members:
+        :undoc-members:
+        :inherited-members:
+        :private-members:
+
+.. admonition:: Colored LU-SGS Relaxation
+   :class: dropdown
+
+    .. autoclass:: pybaram.integrators.relaxation.ColoredLUSGSRelaxation
+        :members:
+        :undoc-members:
+        :inherited-members:
+        :private-members:
+
+.. admonition:: Block LU-SGS Relaxation
+   :class: dropdown
+
+    .. autoclass:: pybaram.integrators.relaxation.BlockLUSGSRelaxation
+        :members:
+        :undoc-members:
+        :inherited-members:
+        :private-members:
+
+.. admonition:: Colored Block LU-SGS Relaxation
+   :class: dropdown
+
+    .. autoclass:: pybaram.integrators.relaxation.ColoredBlockLUSGSRelaxation
+        :members:
+        :undoc-members:
+        :inherited-members:
+        :private-members:
+
+
 The hierarchy of ``integrator`` class can be shown as below.
 
 .. inheritance-diagram:: pybaram.integrators.unsteady.TVDRK3
+                         pybaram.integrators.dts.BDF1DTSIntegrator
+                         pybaram.integrators.dts.BDF2DTSIntegrator
+                         pybaram.integrators.dts.BDF3DTSIntegrator
                          pybaram.integrators.steady.FiveStageRK
                          pybaram.integrators.steady.LUSGS
                          pybaram.integrators.steady.ColoredLUSGS
-                         pybaram.integrators.steady.BlockJacobi
                          pybaram.integrators.steady.BlockLUSGS
                          pybaram.integrators.steady.ColoredBlockLUSGS
     :parts: 1 
@@ -396,4 +512,3 @@ In the `construct_kernels` method, non-blocking send and receive kernels, along 
     .. method:: register
 
     .. method:: sync
-

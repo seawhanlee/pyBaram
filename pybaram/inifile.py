@@ -74,3 +74,6 @@ class INIFile:
 
     def has_section(self, sect):
         return self._cfg.has_section(sect)
+
+    def has_option(self, sect, opt):
+        return self._cfg.has_option(sect, opt)

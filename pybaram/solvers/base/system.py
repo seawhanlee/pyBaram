@@ -46,6 +46,7 @@ class BaseSystem:
 
         # Construct kerenls
         self.eles.construct_kernels(vertex, nreg, impl_op)
+        self.load_soln_history(soln, elemap, cfg, rank)
         self.iint.construct_kernels(elemap, impl_op)
         self.bint.construct_kernels(elemap, impl_op)
 
@@ -97,6 +98,39 @@ class BaseSystem:
                 ele.set_ics_from_sol(sol, aux)
         else:
             self.eles.set_ics_from_cfg()
+
+    def load_soln_history(self, soln, elemap, cfg, rank):
+        if not soln:
+            return
+
+        mode = cfg.get('solver-time-integrator', 'mode', 'unsteady')
+        if mode != 'unsteady-dts':
+            return
+
+        names = cfg.get('solver-time-integrator-dts', 'restart-soln-names', '')
+        idxs = cfg.get('solver-time-integrator-dts', 'restart-soln-idxs', '')
+
+        if not names or not idxs:
+            return
+
+        names = [name.strip() for name in names.split(',')]
+        idxs = [int(idx) for idx in idxs.split(',')]
+
+        missing = []
+
+        for name, idx in zip(names, idxs):
+            for k, ele in elemap.items():
+                key = 'soln_{}_{}_p{}'.format(name, k, rank)
+                if key not in soln:
+                    missing.append(key)
+                    continue
+
+                ele.upts[idx][:] = soln[key]
+
+        if missing and len(missing) != len(names)*len(elemap):
+            raise RuntimeError(
+                'Restart solution is missing DTS history {}'.format(missing[0])
+            )
 
     def load_int_inters(self, msh, be, cfg, rank, elemap):
         key = 'con_p{0}'.format(rank)

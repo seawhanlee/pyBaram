@@ -99,35 +99,15 @@ class NavierStokesElements(BaseAdvecDiffElements, ViscousFluidElements):
         self._const = cfg.items('constants')
 
     def construct_kernels(self, vertex, nreg, impl_op):
-        # Call paraent method
+        # Call parent method
         super().construct_kernels(vertex, nreg)
 
-        # Aux array
-        nauxvars = len(self.auxvars)
-        self.rawaux = rawaux = np.empty((nauxvars, self.neles))
-        
-        # Assign aux variable
-        self.rawmu = rawaux[0]
+        is_aux_initialized = self._construct_aux_arrays()
 
-        if hasattr(self, "_aux"):
-            self.rawaux[:] = self._aux
-            delattr(self, "_aux")
-            is_aux_initialized = True
-        else:
-            is_aux_initialized = False
+        self._construct_impl_arrays(impl_op)
+        self._bind_aux_arrays()
 
-        if impl_op == 'spectral-radius':
-            # Spectral radius
-            self.fspr = self.be.alloc_array((self.nface, self.neles))
-        elif impl_op == 'approx-jacobian':
-            # Jacobian matrix on face
-            self.jmat = self.be.alloc_array((2, self.nfvars, self.nfvars, \
-                                             self.nface, self.neles))
-
-        self.aux = self.be.convert_array(rawaux)
-        self.mu = self.aux[0]
-
-        # Update arguments of post kerenl
+        # Update arguments of post kernel
         self.post.update_args(self.upts_in, self.mu)
 
         if not is_aux_initialized:
@@ -137,6 +117,35 @@ class NavierStokesElements(BaseAdvecDiffElements, ViscousFluidElements):
         # Kernel to compute timestep
         self.timestep = Kernel(*self._make_timestep(),
                                self.upts_in, self.mu, self.dt)
+
+    def _construct_aux_arrays(self):
+        # Raw-prefixed arrays are host-side numpy arrays.
+        nauxvars = len(self.auxvars)
+        self.rawaux = rawaux = np.empty((nauxvars, self.neles))
+        
+        # Assign aux variables
+        self.rawmu = rawaux[0]
+
+        if hasattr(self, "_aux"):
+            self.rawaux[:] = self._aux
+            delattr(self, "_aux")
+            return True
+
+        return False
+
+    def _construct_impl_arrays(self, impl_op):
+        if impl_op == 'spectral-radius':
+            # Spectral radius
+            self.fspr = self.be.alloc_array((self.nface, self.neles))
+        elif impl_op == 'approx-jacobian':
+            # Jacobian matrix on face
+            self.jmat = self.be.alloc_array(
+                (2, self.nfvars, self.nfvars, self.nface, self.neles)
+            )
+
+    def _bind_aux_arrays(self):
+        self.aux = self.be.convert_array(self.rawaux)
+        self.mu = self.aux[0]
 
     def _make_timestep(self):
         # Dimensions
