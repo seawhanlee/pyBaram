@@ -268,38 +268,56 @@ Example::
 
 [solver-time-integrator]
 ************************
-Time integration (or relaxation) schemes and related parameters are configured.
+Time integration, relaxation, and dual-time stepping parameters are configured.
 
-1. mode --- steady or unsteady computation. Currently, dual-time stepping approach is not supported.
+1. mode --- type of time integration.
 
-    ``steady`` | ``unsteady``
+    ``steady`` | ``unsteady`` | ``unsteady-dts``
 
-2. controller --- method to calculate time step size for unsteady simulation. 
+    * ``steady`` --- pseudo-time iteration to obtain a steady-state solution.
+
+    * ``unsteady`` --- physical-time integration using an explicit scheme.
+
+    * ``unsteady-dts`` --- physical-time integration using dual-time stepping.
+
+2. controller --- method to calculate time step size for ``unsteady`` simulation. 
 
     ``cfl`` | ``dt``
 
 3. cfl --- Courant - Friedrichs - Lewy Number. 
-   For unsteady simulation, it is required only for ``cfl`` controller.
-   It is mandatory for steady simulations.
 
     `float`
 
-4. dt --- time step size for unsteady simulation with ``dt`` controller
+   This parameter is used for ``steady`` simulations and for ``unsteady``
+   simulations with ``controller = cfl``.
+
+4. dt --- physical time step size.
 
     `float`
+
+   This parameter is used for ``unsteady`` simulations with ``controller = dt``
+   and for ``unsteady-dts`` simulations.
 
 5. stepper --- method to advance time step.
-   For unsteady simulation, there are following options
+   For ``unsteady`` simulation, there are following options
 
     ``eulerexplicit`` | ``tvd-rk3``
 
-   For steady simulation, following options can be selected.
+   For ``steady`` simulation, following options can be selected.
 
-    ``eulerexplicit`` | ``tvd-rk3`` | ``rk5`` | ``lu-sgs`` | ``colored-lu-sgs`` | ``jacobi`` | ``blu-sgs`` | ``colored-blu-sgs``
+    ``eulerexplicit`` | ``tvd-rk3`` | ``rk5`` | ``lu-sgs`` | ``colored-lu-sgs`` | ``blu-sgs`` | ``colored-blu-sgs``
+
+   For ``unsteady-dts`` simulation, following options can be selected.
+
+    ``bdf1`` | ``bdf2`` | ``bdf3``
+
+   In dual-time stepping, higher-order BDF steppers start from lower order
+   until enough physical-time history is available: ``bdf2`` starts with BDF1,
+   and ``bdf3`` starts with BDF1 and then BDF2.
 
     * ``lu-sgs``, ``blu-sgs`` --- These schemes work only if disabling multi-threading layer (``single``).
 
-6. time --- initial and the last time for unsteady simulation
+6. time --- initial and the last physical time for ``unsteady`` and ``unsteady-dts`` simulations.
 
     `float`, `float`
 
@@ -317,25 +335,33 @@ Time integration (or relaxation) schemes and related parameters are configured.
 
     `string`
 
-10. coloring --- the coloring strategy for colored LU-SGS scheme provided in `networkx.greedy_color` algorithm.
+10. sub-cfl --- pseudo-time CFL number for ``unsteady-dts`` simulation.
+
+     `float`
+
+11. sub-iter --- The maximum iteration number for sub-iteration process.
+    For ``unsteady-dts`` simulation, this is the maximum number of pseudo-time
+    sub-iterations per physical time step.
+
+     `int`
+
+12. sub-tol --- The stopping criteria for sub-iteration.
+    For ``unsteady-dts`` simulation, this is applied to pseudo-time convergence
+    within each physical time step.
+
+     `float`
+
+13. coloring --- the coloring strategy for colored LU-SGS scheme provided in `networkx.greedy_color` algorithm.
     Default variable is `largest_first`.
 
      `string`
 
-11. turb-cfl-factor --- The factor of the ``cfl`` number for turbulent equations with respect to that of flow equations. 
+14. turb-cfl-factor --- The factor of the pseudo-time ``cfl`` number for turbulent equations with respect to that of flow equations. 
     It adjusts the pseudo time for turbulence equations to alleviate numerical difficulties. The default value is 1.0.
-
-     `string`
-
-12. sub-iter --- The maximum iteration number for Jacobi sub-iteration process. The default value is 10.
-
-     `int`
-
-13. sub-tol --- The stopping criteria for the Jacobi sub-iteration. The default value is 0.005.
 
      `float`
 
-14. visflux-jacobian --- The computing type of viscous Jacobian matrix for several implicit methods.
+15. visflux-jacobian --- The computing type of viscous Jacobian matrix for several implicit methods.
 
      ``tlns`` | ``approximate`` | ``none``
 
@@ -355,6 +381,21 @@ Example for unsteady simulation::
     time = 0, 0.25
     cfl = 0.9
 
+Example for unsteady simulation with dual-time stepping::
+
+    [solver-time-integrator]
+    mode = unsteady-dts
+    stepper = bdf2
+    time = 0, 0.25
+    dt = 1e-3
+    sub-cfl = 5.0
+    sub-iter = 50
+    sub-tol = 1e-3
+    res-var = rho
+
+    [solver-time-relaxation]
+    method = lu-sgs
+
 Example for steady simulation::
 
     [solver-time-integrator]
@@ -364,6 +405,23 @@ Example for steady simulation::
     max-iter = 10000
     tolerance = 1e-12
     res-var = rhou
+
+
+[solver-time-relaxation]
+************************
+Pseudo-time relaxation method for ``unsteady-dts`` simulations is configured.
+
+1. method --- relaxation method for pseudo-time sub-iterations.
+
+    ``lu-sgs`` | ``colored-lu-sgs`` | ``blu-sgs`` | ``colored-blu-sgs``
+
+2. sub-iter --- the maximum iteration number for block LU-SGS sub-iteration process.
+
+    `int`
+
+3. sub-tol --- the stopping criteria for block LU-SGS sub-iteration.
+
+    `float`
 
 
 [solver-cfl-ramp]

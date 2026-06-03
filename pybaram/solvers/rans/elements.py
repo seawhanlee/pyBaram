@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from pybaram.solvers.baseadvecdiff import BaseAdvecDiffElements
 from pybaram.backends.types import Kernel
+from pybaram.solvers.rans.walldistance import compute_wall_distance
 from pybaram.utils.nb import dot
 from pybaram.utils.np import npeval
 
@@ -21,11 +22,13 @@ class RANSElements(BaseAdvecDiffElements):
         xc = self.geom.xc(self.eles).T
 
         # Calculate wall distance
-        self._ydist = ydist = self._wall_distance(btri)
+        self._ydist = ydist = compute_wall_distance(
+            self.be, self.ndims, self.neles, self.xc, btri
+        )
 
         # Parse initial condition from expressions
         subs = dict(zip('xyz', xc))
-        subs.update({'ydist' : ydist})
+        subs.update({'ydist': ydist})
         ics = [npeval(self.cfg.getexpr('soln-ics', v, self._const), subs)
                for v in self.primevars]
         ics = self.prim_to_conv(ics, self.cfg)
@@ -36,26 +39,52 @@ class RANSElements(BaseAdvecDiffElements):
             self._ics[i] = ics[i]        
 
     def construct_kernels(self, vertex, nreg, impl_op):
-        # Aux array
-        # raw-prefixed array : np.ndarray
+        is_aux_initialized = self._construct_aux_arrays()
+
+        # Call parent method
+        super().construct_kernels(vertex, nreg)
+
+        self._construct_impl_arrays(impl_op)
+        self._bind_aux_arrays()
+
+        # Update arguments of post kernel
+        self.post.update_args(
+            self.ydist, self.upts_in, self.grad, self.mu, self.mut
+        )
+
+        if not is_aux_initialized:
+            # Initialize viscosity
+            self.post()
+
+        # Update arguments of divergence kernel
+        div_args = (
+            *self._div_upts_args, self.upts_out, self.fpts, self.upts_in,
+            self.grad, self.dsrc, self.mu, self.mut, self.ydist
+        )
+        self.div_upts.update_args(*div_args)
+
+        # Kernel to compute timestep
+        self.timestep = Kernel(*self._make_timestep(),
+                               self.upts_in, self.mu, self.mut, self.dt)
+
+    def _construct_aux_arrays(self):
+        # Raw-prefixed arrays are host-side numpy arrays.
         nauxvars = len(self.auxvars)
         self.rawaux = rawaux = np.empty((nauxvars, self.neles))
 
-        # Assign aux variable
+        # Assign aux variables
         self.rawydist, self.rawmu, self.rawmut = rawaux
 
         if hasattr(self, "_aux"):
             self.rawaux[:] = self._aux
             delattr(self, "_aux")
-            is_aux_initialized = True
-        else:
-            self.rawaux[0] = self._ydist
-            delattr(self, '_ydist')
-            is_aux_initialized = False
+            return True
 
-        # Call paraent method
-        super().construct_kernels(vertex, nreg)
+        self.rawaux[0] = self._ydist
+        delattr(self, '_ydist')
+        return False
 
+    def _construct_impl_arrays(self, impl_op):
         if impl_op == 'spectral-radius':
             # Spectral radius (flow and turbulent model)
             self.fspr = self.be.alloc_array((self.nface, self.neles))
@@ -63,155 +92,16 @@ class RANSElements(BaseAdvecDiffElements):
         elif impl_op == 'approx-jacobian':
             # Jacobian matrices (flow and turbulent model)
             # 2-dimensional arrays (FVS and Upwind)
-            self.jmat = self.be.alloc_array((2, self.nfvars, self.nfvars, \
-                                  self.nface, self.neles))
-            self.tjmat = self.be.alloc_array((2, self.nturbvars, self.nturbvars, \
-                                   self.nface, self.neles))
+            self.jmat = self.be.alloc_array(
+                (2, self.nfvars, self.nfvars, self.nface, self.neles)
+            )
+            self.tjmat = self.be.alloc_array(
+                (2, self.nturbvars, self.nturbvars, self.nface, self.neles)
+            )
 
-        self.aux = self.be.convert_array(rawaux)
+    def _bind_aux_arrays(self):
+        self.aux = self.be.convert_array(self.rawaux)
         self.ydist, self.mu, self.mut = self.aux
-
-        # Update arguments of post kernel
-        self.post.update_args(self.ydist, self.upts_in, self.grad, self.mu, self.mut)
-
-        if not is_aux_initialized:
-            # Initialize viscosity
-            self.post()
-
-        # Update arguments of divergence kernel
-        rcp_vol = self.be.convert_array(self.rcp_vol)
-        self.div_upts.update_args(
-            rcp_vol, self.ydist, self.upts_out, self.fpts, self.upts_in,
-            self.grad, self.dsrc, self.mu, self.mut
-        )
-
-        # Kernel to compute timestep
-        self.timestep = Kernel(*self._make_timestep(),
-                               self.upts_in, self.mu, self.mut, self.dt)
-
-    def _wall_distance(self, btri):
-        wall_dist = np.empty(self.neles)
-
-        # Define wall distance function
-        if self.ndims == 2:
-            from pybaram.utils.nb import dist2d_at
-
-            def distf(i_begin, i_end, is_masked, idx, xw, xc, wdist):       
-                for _i in range(i_begin, i_end):
-                    # Cell index
-                    k = is_masked[_i]
-                    for _j in range(5):
-                        # Candidates of nearest wall index
-                        j = idx[_i, _j]
-                        status, distj = dist2d_at(xw[j][0], xw[j][1], xc[k])
-
-                        if _j == 0:
-                            dist = distj
-                        else:
-                            dist = min(dist, distj)
-
-                        if status == 0:
-                            break
-
-                    # Update wall distance
-                    wdist[k] = dist
-
-        elif self.ndims == 3:
-            from pybaram.utils.nb import dist3d_at
-
-            def distf(i_begin, i_end, is_masked, idx, xw, xc, wdist):       
-                nj = idx.shape[1]
-                for _i in range(i_begin, i_end):
-                    # Cell index
-                    k = is_masked[_i]
-                    for _j in range(nj):
-                        # Candidates of nearest wall index
-                        j = idx[_i, _j]
-
-                        status, distj = dist3d_at(xw[j][0], xw[j][1], xw[j][2], xc[k])
-
-                        if _j == 0:
-                            dist = distj
-                        else:
-                            dist = min(dist, distj)
-
-                        if status == 0:
-                            break
-                    
-                    # Update wall distance
-                    wdist[k] = dist
-
-        # Compute wall distance using KDtree version 
-        try:
-            # pykdtree
-            self._wall_distance_kdtree_pykdtree(btri, wall_dist, distf)
-        except:
-            # Scipy
-            self._wall_distance_kdtree_scipy(btri, wall_dist, distf)
-
-        return wall_dist
-    
-    def _wall_distance_kdtree_scipy(self, xw, wdist, distf):
-        from scipy.spatial import KDTree
-
-        xwc = np.average(xw, axis=1)
-        
-        # Build Tree data
-        tree = KDTree(xwc)
-
-        # Check multi-thread or not
-        if self.be.multithread == 'single':
-            workers = 1
-        else:
-            workers = -1
-
-        # Fast distance
-        fast_distance, fast_idx = tree.query(self.xc, workers=workers)
-        wdist[:] = fast_distance
-
-        # Threshold : two times of max distance btw vertex to center of triangle
-        threshold = 2*np.max(np.linalg.norm(xw - xwc[:, None], axis=2), axis=1)
-        
-        # Mask if dist < threshold of nearest triangle
-        mask = fast_distance < threshold[fast_idx]
-        
-        # Detail check (User tunable)
-        n_neighbor = max(len(xwc) // 1000, 50)
-        _, idx = tree.query(self.xc[mask], k=n_neighbor, workers=workers)
-
-        is_masked = np.where(mask)[0]
-        self.be.make_loop(len(is_masked), distf, host=True)[0](is_masked, idx, xw, self.xc, wdist)
-        
-        # Delete tree
-        del(tree)
-
-    def _wall_distance_kdtree_pykdtree(self, xw, wdist, distf):
-        from pykdtree.kdtree import KDTree
-
-        xwc = np.average(xw, axis=1)
-        
-        # Build Tree data
-        tree = KDTree(xwc)
-
-        # Fast distance
-        fast_distance, fast_idx = tree.query(self.xc)
-        wdist[:] = fast_distance
-
-        # Threshold : two times of max distance btw vertex and center of triangle
-        threshold = 2*np.max(np.linalg.norm(xw - xwc[:, None], axis=2), axis=1)
-        
-        # Mask if dist < threshold of nearest triangle
-        mask = fast_distance < threshold[fast_idx]
-        
-        # Detail check (User tunable)
-        n_neighbor = max(len(xwc) // 1000, 50)
-        _, idx = tree.query(self.xc[mask], k=n_neighbor)
-
-        is_masked = np.where(mask)[0]
-        self.be.make_loop(len(is_masked), distf, host=True)[0](is_masked, idx, xw, self.xc, wdist)
-        
-        # Delete tree
-        del(tree)
 
     def make_wave_speed(self):
         # Dimensions and constants
@@ -234,7 +124,7 @@ class RANSElements(BaseAdvecDiffElements):
     def _make_timestep(self):
         # Dimensions
         ndims, nface = self.ndims, self.nface
-        nflvars = self.nfvars
+        nfvars = self.nfvars
 
         # Static variables
         vol = self.vol
@@ -249,7 +139,7 @@ class RANSElements(BaseAdvecDiffElements):
         def timestep(i_begin, i_end, smag, svec, vol, u, mu, mut, dt, cfl):
             for idx in range(i_begin, i_end):
                 rho = u[0, idx]
-                et = u[nflvars-1, idx]
+                et = u[nfvars-1, idx]
                 rv2 = dot(u[:, idx], u[:, idx], ndims, 1, 1)/rho
 
                 p = max((gamma - 1)*(et - 0.5*rv2), pmin)
@@ -261,7 +151,7 @@ class RANSElements(BaseAdvecDiffElements):
                     # Inviscid spectral radius: Wave speed abs(Vn) + c
                     lamc += (abs(dot(u[:, idx], svec[jdx, idx], ndims, 1, 0))/rho + c)*smag[jdx, idx]
 
-                    # Viscous spectral radisu: max(4/3 \gamma)/rho/(mu/pr+mut/prt)/length
+                    # Viscous spectral radius
                     lamv += (1/rho*max(4/3, gamma)*(mu[idx]/pr + mut[idx]/prt)*
                               smag[jdx, idx]**2/vol[idx])
 
@@ -289,33 +179,53 @@ class RANSElements(BaseAdvecDiffElements):
                     for k in range(nface):
                         fpts[k, l, i] = upts[l, i]
 
-        return self.be.make_loop(self.neles,_cal_recon, op)
+        return self.be.make_loop(self.neles, _cal_recon, op)
 
     def _make_div_upts(self):
-        nvars, nface = self.nvars, self.nface
-
         turb_src = self.turb_src_container()
+        src, has_xc = self._source_exprs()
 
-        def _div_upts(i_begin, i_end, rcp_vol, ydist,
-                      rhs, fpts, upts, grad, dsrc, mu, mut, t=0):
-            for idx in range(i_begin, i_end):
-                rcp_voli = rcp_vol[idx]
-                for jdx in range(nvars):
-                    tmp = 0.0
-                    for kdx in range(nface):
-                        tmp += fpts[kdx, jdx, idx]
+        rcp_vol = self.be.convert_array(self.rcp_vol)
+        args = 'rcp_vol, rhs, fpts, upts, grad, dsrc, mu, mut, ydist'
+        if has_xc:
+            xc = self.be.convert_array(self.xc.T)
+            self._div_upts_args = (rcp_vol, xc)
+            args = 'rcp_vol, xc, rhs, fpts, upts, grad, dsrc, mu, mut, ydist'
+        else:
+            self._div_upts_args = (rcp_vol,)
 
-                    rhs[jdx, idx] = -rcp_voli*tmp
+        f_txt = (
+            f"def _div_upts(i_begin, i_end, {args}, t=0):\n"
+            f"    for idx in range(i_begin, i_end):\n"
+            f"        rcp_voli = rcp_vol[idx]\n"
+        )
+        for j, s in enumerate(src):
+            subtxt = "+".join("fpts[{},{},idx]".format(i, j)
+                              for i in range(self.nface))
+            f_txt += "        rhs[{}, idx] = -rcp_voli*({}) + {}\n".format(
+                j, subtxt, s)
 
-                # Turbulence source term
-                turb_src(upts[:, idx], grad[:, :, idx], mu[idx], mut[idx],
-                         ydist[idx], rhs[:, idx], dsrc[:, idx])
+        f_txt += (
+            f"\n"
+            f"        # Turbulence source term\n"
+            f"        turb_src(upts[:, idx], grad[:, :, idx], mu[idx], mut[idx],\n"
+            f"                 ydist[idx], rhs[:, idx], dsrc[:, idx])"
+        )
 
-        return self.be.make_loop(self.neles, _div_upts)
+        lvars = {}
+        exec(f_txt, {"np": np, "turb_src": turb_src}, lvars)
+
+        # Compile the function
+        if has_xc:
+            return self.be.make_loop(self.neles, lvars["_div_upts"],
+                                     rcp_vol, xc, src=f_txt)
+        else:
+            return self.be.make_loop(self.neles, lvars["_div_upts"],
+                                     rcp_vol, src=f_txt)
 
     def _make_post(self):
         # Get post-process function
-        _fix_nonPys = self.fix_nonPys_container()
+        _fix_nonphys = self.fix_nonPys_container()
         _compute_mu = self.mu_container()
         _compute_mut = self.mut_container()
 
@@ -324,7 +234,7 @@ class RANSElements(BaseAdvecDiffElements):
         def post(i_begin, i_end, ydist, upts, grad, mu, mut):
             # Apply the function over eleemnts
             for idx in range(i_begin, i_end):
-                _fix_nonPys(upts[:, idx])
+                _fix_nonphys(upts[:, idx])
                 mu[idx] = _compute_mu(upts[:, idx])
                 mut[idx] = _compute_mut(
                     upts[:, idx], grad[:,:,idx], mu[idx], ydist[idx]

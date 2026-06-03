@@ -35,6 +35,9 @@ class ArrayBank:
     def value(self):
         # Return current array in the bank
         return self.mat[self.idx]
+    
+    def set(self, v):
+        self.mat[self.idx][:] = v
 
 
 class NullKernel:
@@ -46,29 +49,22 @@ class Kernel:
     """
     Kernel object
 
-    It stores the static arguments.
-    It executes function with static and dynamic arguments
+    Stores static arguments and executes a function with
+    both static and runtime arguments.
     """
-    def __init__(self, fun, *args, arg_trans_pos=False):
-        # Store functions and static argument
+    def __init__(self, fun, *args):
         self._fun = fun
         self._args = args
 
-        # Transpose argument for execute function
-        if arg_trans_pos:
-            self._sum_args = lambda x, y : y + x 
-        else:
-            self._sum_args = lambda x, y : x + y
-
     def __call__(self, *args):
         # Merge static argument and dynamic argument
-        args = self._sum_args(self._args, args)
+        combined = self._args + args
 
         # Parse args for Array bank object
-        args = [_extract(arg) for arg in args]
+        parsed = [_extract(arg) for arg in combined]
 
         # Run function
-        return self._fun(*args)
+        return self._fun(*parsed)
 
     def update_args(self, *args):
         # Update static argument

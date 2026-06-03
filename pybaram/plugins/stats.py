@@ -31,6 +31,10 @@ class StatsPlugin(BasePlugin):
                 if intg.impl_op == 'approx-jacobian':
                     header += ['subiter', 'subres']
                 self.t0 = perf_counter()
+            elif intg.mode == 'unsteady-dts':
+                ele = next(iter(intg.sys.eles))
+                conservars = ele.conservars
+                header += ['t', *conservars]
             else:
                 header += ['t', 'dt']
 
@@ -49,6 +53,15 @@ class StatsPlugin(BasePlugin):
                 if intg.impl_op == 'approx-jacobian':
                     stats += [intg.subitnum, intg.subres]
                 self.t0 = perf_counter()
+            elif intg.mode == 'unsteady-dts':
+                for it, t, resid in intg.substats:
+                    stats = [it, t, *resid.tolist()]
+                    print(','.join(str(r) for r in stats), file=self.outf)
+
+                intg.substats.clear()
+                if intg.iter % self.flushsteps == 0:
+                    self.outf.flush()
+                return
             else:
                 stats += [intg.tcurr, intg.dt]
 

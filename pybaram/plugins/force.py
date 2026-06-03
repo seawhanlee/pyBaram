@@ -90,7 +90,12 @@ class ForcePlugin(BasePlugin):
             self.itout = cfg.getint(sect, 'iter-out', 100)
             lead = ['iter']
         else:
-            self.dtout = cfg.getfloat(sect, 'dt-out')
+            if self.mode == 'unsteady-dts':
+                dtout = intg.dt  
+            else:
+                dtout = None
+                
+            self.dtout = cfg.getfloat(sect, 'dt-out', dtout)
             self.tout_next = intg.tcurr + self.dtout
             intg.add_tlist(self.dtout)
             lead = ['t']

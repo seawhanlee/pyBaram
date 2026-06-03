@@ -89,6 +89,47 @@ A fully turbulent RANS simulation is performed under transonic conditions. The p
    Mach contour of flow over RAE2822 airfoil
 
 
+Unsteady flow over a circular cylinder
+======================================
+This example considers two-dimensional unsteady flow over a circular cylinder.
+At the Reynolds number considered here, the separated wake becomes periodic and
+forms a von Karman vortex street.
+
+The free-stream conditions are defined as
+
+.. math::
+   M_\infty = 0.2, \qquad
+   Re_D = 150,
+
+where the Reynolds number is based on the cylinder diameter :math:`D`. An
+unsteady Navier-Stokes simulation is performed with a second-order BDF time
+integrator. The procedures to obtain the unsteady solution are presented as
+follows:
+
+1. Convert mesh::
+
+    user@Computer ~/pyBaram/examples/cylinder$ pybaram import cylinder.cgns cylinder.pbrm
+
+2. Run the simulation::
+
+    user@Computer ~/pyBaram/examples/cylinder$ pybaram run cylinder.pbrm cylinder.ini
+
+3. Convert the solution to a VTK file for visualization::
+
+    user@Computer ~/pyBaram/examples/cylinder$ pybaram export cylinder.pbrm out-100.00.pbrs out.vtu
+
+4. After visualizing the solution in ParaView, you should obtain the following result.
+
+.. figure:: ./figs/cylinder/vorticity.png
+   :width: 450px
+   :figwidth: 450px
+   :alt: cylinder
+   :align: center
+
+   Vorticity contour of vortex shedding behind a circular cylinder at
+   :math:`Re_D = 150`.
+
+
 Transonic flow over ONERA M6 wing
 =================================
 This example considers transonic flow over the ONERA M6 wing, which is a standard benchmark for three-dimensional transonic flow simulations. The flow conditions follow the ONERA M6 test case documented in the `NASA Turbulence Modeling Resource <https://turbmodels.larc.nasa.gov/onerawingnumerics_val.html>`_.

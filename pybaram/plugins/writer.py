@@ -33,9 +33,10 @@ class WriterPlugin(BasePlugin):
 
         # Check integrator mode (steady | unsteady) and frequency to compute the plugin
         self.mode = mode = intg.mode
-        if mode == 'unsteady':
+        if mode in ('unsteady', 'unsteady-dts'):
             self.dtout = cfg.getfloat('soln-plugin-writer', 'dt-out')
             self.tout_next = intg.tcurr + self.dtout
+
             intg.add_tlist(self.dtout)
         else:
             self.itout = cfg.getint('soln-plugin-writer', 'iter-out', 100)
@@ -47,6 +48,10 @@ class WriterPlugin(BasePlugin):
         # Collect solution info
         etypes = [ele.name for ele in intg.sys.eles]
         shapes = [sol.shape for sol in intg.curr_soln]
+        self._soln_fields = [self._prefix] + [
+            '{}_{}'.format(self._prefix, name)
+            for name, idx in intg.restart_soln_idxs()
+        ]
         eleinfo = comm.gather(
             tuple((e, s) for e, s in zip(etypes, shapes)), root=0
             )
@@ -67,23 +72,27 @@ class WriterPlugin(BasePlugin):
 
             # Predefine receive requests
             for p, eleinfo_p in enumerate(eleinfo):
-                for tag, (etype, shape) in enumerate(eleinfo_p):
-                    key = '{}_{}_p{}'.format(self._prefix, etype, p)
+                tag = 0
+                for field in self._soln_fields:
+                    for etype, shape in eleinfo_p:
+                        key = '{}_{}_p{}'.format(field, etype, p)
 
-                    if p == 0:
-                        loc_keys.append(key)
-                    else:
-                        buf = np.empty(shape, dtype=np.float64)
-                        req = comm.Recv_init(buf, p, tag)
+                        if p == 0:
+                            loc_keys.append(key)
+                        else:
+                            buf = np.empty(shape, dtype=np.float64)
+                            req = comm.Recv_init(buf, p, tag)
 
-                        mpi_bufs.append(buf)
-                        mpi_reqs.append(req)
-                        mpi_keys.append(key)
+                            mpi_bufs.append(buf)
+                            mpi_reqs.append(req)
+                            mpi_keys.append(key)
+
+                        tag += 1
 
             if intg.is_aux:
                 for p, auxinfo_p in enumerate(auxinfo):
-                    for tag, (etype, shape) in enumerate(auxinfo_p):
-                        tag += len(auxinfo_p)
+                    tag_offset = len(self._soln_fields)*len(eleinfo[p])
+                    for tag, (etype, shape) in enumerate(auxinfo_p, tag_offset):
 
                         key = 'aux_{}_p{}'.format(etype, p)
 
@@ -102,7 +111,7 @@ class WriterPlugin(BasePlugin):
             self(intg)           
 
     def __call__(self, intg):
-        if self.mode == 'unsteady':
+        if self.mode in ('unsteady', 'unsteady-dts'):
             if abs(intg.tcurr - self.tout_next) > 1e-6:
                 return
 
@@ -110,6 +119,8 @@ class WriterPlugin(BasePlugin):
             t = intg.tcurr
             self._stat.set('solver-time-integrator', 'tcurr', str(t))
             self._stat.set('solver-time-integrator', 'iter', str(intg.iter))
+            if self.mode == 'unsteady-dts':
+                self._stat.set('solver-time-integrator', 'piter', str(intg.piter))
 
             self.tout_next += self.dtout
 
@@ -132,15 +143,21 @@ class WriterPlugin(BasePlugin):
 
         if self._rank != 0:
             # Send data to rank=0
-            for tag, soln in enumerate(intg.curr_soln):
-                self._comm.Send(soln.copy(), 0, tag)
+            tag = 0
+            for solns in self._soln_arrays(intg):
+                for soln in solns:
+                    self._comm.Send(soln.copy(), 0, tag)
+                    tag += 1
+
             if intg.is_aux:
-                naux = len(intg.curr_aux)
-                for tag, aux in enumerate(intg.curr_aux):
-                    self._comm.Send(aux.copy(), 0, tag + naux)
+                for aux in intg.curr_aux:
+                    self._comm.Send(aux.copy(), 0, tag)
+                    tag += 1
         else:
             # Local data
-            curr = intg.curr_soln
+            curr = []
+            for solns in self._soln_arrays(intg):
+                curr += solns
 
             if intg.is_aux:
                 curr += intg.curr_aux
@@ -161,3 +178,11 @@ class WriterPlugin(BasePlugin):
             with h5py.File(fname, 'w') as f:
                 for k, v in self.out.items():
                     f[k] = v
+
+    def _soln_arrays(self, intg):
+        solns = [intg.curr_soln]
+        solns += [
+            intg.soln_at(idx) for name, idx in intg.restart_soln_idxs()
+        ]
+
+        return solns

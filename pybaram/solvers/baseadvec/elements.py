@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import numpy as np
-import re
 
 from pybaram.solvers.base import BaseElements
 from pybaram.solvers.euler.jacobian import make_convective_jacobian
@@ -19,15 +18,20 @@ class BaseAdvecElements(BaseElements):
         # Solution vector bank and assign upts index
         self.upts_in = upts_in = ArrayBank(upts, 0)
         self.upts_out = upts_out = ArrayBank(upts, 1)
-
-        # Residual vector
-        self.h_resid, self.d_resid = self.be.alloc_array((self.nvars,), mapped=True)
-        self.resid_out = self.be.alloc_array((self.nvars, self.neles), init=0)
+        self.upts_res = upts_res = ArrayBank(upts, 1)
 
         # Construct arrays for flux points, dt and derivatives of source term
         self.fpts = fpts = self.be.alloc_array((self.nface, self.nvars, self.neles))
         self.dt = self.be.alloc_array((self.neles,))
+
+        #TODO: Maybe re-use vpts?
         self.dsrc = self.be.alloc_array((self.nvars, self.neles), init=0)
+
+        # Residual vector
+        self.h_resid, self.d_resid = self.be.alloc_array((self.nvars,), mapped=True)
+        
+        # Re-use fpts for residual
+        self.resid_out = ArrayBank(fpts, 0)
 
         if self.order > 1:
             # Array for gradient and limiter
@@ -46,7 +50,7 @@ class BaseAdvecElements(BaseElements):
         self.div_upts = Kernel(*self._make_div_upts(), upts_out, fpts, upts_in)
 
         # Kernel to compute residuals
-        self.compute_resid = Kernel(*self._make_compute_resid(), self.upts_out, self.resid_out)
+        self.compute_resid = Kernel(*self._make_compute_resid(), upts_res, self.resid_out)
         self.reduce_resid = Kernel(self.be.reduce_array(self.nvars), self.resid_out, self.d_resid)
 
         if self.order > 1:
@@ -95,12 +99,7 @@ class BaseAdvecElements(BaseElements):
         
         return self.be.make_loop(self.neles, _compute_fpts)
 
-    def _make_div_upts(self):
-        # Global variables for compile
-        rcp_vol = self.be.convert_array(self.rcp_vol)
-        xcT = self.be.convert_array(self.xc.T)
-        gvars = {"np": np, "rcp_vol": rcp_vol}
-
+    def _source_exprs(self):
         # Position, constants and numerical functions
         subs = {x: 'xc[{0}, idx]'.format(i)
                 for i, x in enumerate('xyz'[:self.ndims])}
@@ -112,17 +111,24 @@ class BaseAdvecElements(BaseElements):
         subs.update({v.lower() : 'upts[{0}, idx]'.format(i)
                      for i, v in enumerate(self.conservars)})
 
-        # Parase source term
+        # Parse source term
         src = [self.cfg.getexpr('solver-source-terms', k, subs, default=0.0)
                for k in self.conservars]
 
-        # Parse xc in source term
-        if any([re.search(r'xc\[.*?\]', s) for s in src]):
-            gvars.update({"xc": xcT})
+        return src, any('xc[' in s for s in src)
+
+    def _make_div_upts(self):
+        # Global variables for compile
+        rcp_vol = self.be.convert_array(self.rcp_vol)
+        src, has_xc = self._source_exprs()
 
         # Construct function text
+        if has_xc:
+            args = 'rcp_vol, xc, rhs, fpts, upts'
+        else:
+            args = 'rcp_vol, rhs, fpts, upts'
         f_txt = (
-            f"def _div_upts(i_begin, i_end, rcp_vol, xc, rhs, fpts, upts, t=0):\n"
+            f"def _div_upts(i_begin, i_end, {args}, t=0):\n"
             f"    for idx in range(i_begin, i_end): \n"
             f"        rcp_voli = rcp_vol[idx]\n"
         )
@@ -134,11 +140,16 @@ class BaseAdvecElements(BaseElements):
 
         # Execute python function and save in lvars
         lvars = {}
-        exec(f_txt, gvars, lvars)
+        exec(f_txt, {"np": np}, lvars)
 
-        # Compile the funtion
-        return self.be.make_loop(self.neles, lvars["_div_upts"],
-                                 rcp_vol, xcT, src=f_txt)
+        # Compile the function
+        if has_xc:
+            xc = self.be.convert_array(self.xc.T)
+            return self.be.make_loop(self.neles, lvars["_div_upts"],
+                                     rcp_vol, xc, src=f_txt)
+        else:
+            return self.be.make_loop(self.neles, lvars["_div_upts"],
+                                     rcp_vol, src=f_txt)
 
     def _make_grad(self):
         nface, ndims, nvars = self.nface, self.ndims, self.nvars

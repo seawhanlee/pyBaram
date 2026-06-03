@@ -10,7 +10,7 @@ class BaseAdvecDiffSystem(BaseAdvecSystem):
     _bcinters_cls = BaseAdvecDiffBCInters
     _mpiinters_cls = BaseAdvecDiffMPIInters
 
-    def rhside(self, idx_in=0, idx_out=1, t=0, is_norm=False):
+    def rhside(self, idx_in=0, idx_out=1, t=0):
         # Adjust Banks
         self.eles.upts_in.idx = idx_in
         self.eles.upts_out.idx = idx_out
@@ -99,16 +99,3 @@ class BaseAdvecDiffSystem(BaseAdvecSystem):
 
         # Compute divergence 
         self.eles.div_upts(t)
-
-        if is_norm:
-            # Compute residual if requested
-            self.eles.compute_resid()
-            self.eles.reduce_resid()
-
-            # Wait for the mapped memory reduction
-            self.be.wait()
-            resid = sum(self.eles.h_resid)
-            
-            return resid
-        else:
-            return 'none'

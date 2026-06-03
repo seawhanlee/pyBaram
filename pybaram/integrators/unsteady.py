@@ -10,7 +10,7 @@ import numpy as np
 
 class BaseUnsteadyIntegrator(BaseIntegrator):
     """
-    Explict Time integrator for
+    Explicit time integrator for
     - EulerExplicit
     - Runge-Kutta
     """
@@ -18,10 +18,7 @@ class BaseUnsteadyIntegrator(BaseIntegrator):
     impl_op = 'none'
 
     def __init__(self, be, cfg, msh, soln, comm):
-        # get MPI_COMM_WORLD
-        self._comm = comm
-
-        # get list of physical time to run
+        # Get list of physical times to run.
         self.tlist = eval(cfg.get('solver-time-integrator', 'time'))
 
         if soln:
@@ -52,18 +49,17 @@ class BaseUnsteadyIntegrator(BaseIntegrator):
             self._timestep = lambda ttag: min(dt, ttag - self.tcurr)
 
     def add_tlist(self, dt):
-        # Add intermediate time in physcal time list with stride
+        # Add intermediate times to the physical time list with a stride.
         tlist = self.tlist
         tmp = np.arange(tlist[0], tlist[-1], dt)
         self.tlist = np.sort(np.unique(np.concatenate([tlist, tmp])))
 
     def _make_stages(self, out, *args):
-        # Generate formulation of each RK stage 
-        eq_str = '+'.join('{}*upts[{}][j, idx]'.format(a, i) for a, i in zip(args[::2], args[1::2]))
+        eq_str = self._make_stage_expr(args)
 
         # Generate Python function for each RK stage
         f_txt =(
-            f"def stage(i_begin, i_end, dt, *upts):\n"
+            f"def stage(i_begin, i_end, upts, dt):\n"
             f"    for idx in range(i_begin, i_end):\n"
             f"        for j in range(nvars):\n"
             f"            upts[{out}][j, idx] = {eq_str}"
@@ -71,14 +67,9 @@ class BaseUnsteadyIntegrator(BaseIntegrator):
 
         kernels = []
         for ele in self.sys.eles:
-            # Initiate Python function of RK stage for each element
-            gvars = {'nvars' : ele.nvars}
-            lvars = {}
-            exec(f_txt, gvars, lvars)
-
             # Generate JIT kernel by looping RK stage function
-            _stage = self.be.make_loop(ele.neles, lvars['stage'], src=f_txt)
-            kernels.append(Kernel(*_stage, *ele.upts, arg_trans_pos=True))
+            _stage = self._compile_stage(ele, f_txt)
+            kernels.append(Kernel(*_stage, tuple(ele.upts)))
         
         # Collect RK stage kernels for elements
         return ProxyList(kernels)
@@ -97,6 +88,10 @@ class BaseUnsteadyIntegrator(BaseIntegrator):
 
         # Adjust time step for target time
         return min(ttag - self.tcurr, dtmin)
+
+    def rhs(self, idx_in=0, idx_out=1, t=0):
+        # Compute right hand side
+        self.sys.rhside(idx_in, idx_out, t=t)
 
     def advance_to(self, ttag):
         while self.tcurr < ttag:
@@ -120,11 +115,10 @@ class EulerExplicit(BaseUnsteadyIntegrator):
         self._stages = stages = []
         stages.append(self._make_stages(0, 1, 0, 'dt', 1))
 
-    def step(self, dt):
-        sys = self.sys
+    def step(self, dt, t):
         stages = self._stages
 
-        sys.rhside()
+        self.rhs(t=t)
         stages[0](dt)
 
         self.sys.post(0)
@@ -143,18 +137,17 @@ class TVDRK3(BaseUnsteadyIntegrator):
         stages.append(self._make_stages(0, 1/3, 0, 2/3, 2, '2*dt/3', 1))
 
     def step(self, dt, t):
-        sys = self.sys
         stages = self._stages
 
-        sys.rhside(t=t)
+        self.rhs(t=t)
         stages[0](dt)
         self.sys.post(2)
 
-        sys.rhside(2, 1, t=t)
+        self.rhs(2, 1, t=t)
         stages[1](dt)
         self.sys.post(2)
 
-        sys.rhside(2, 1, t=t)
+        self.rhs(2, 1, t=t)
         stages[2](dt)        
         self.sys.post(0)
 

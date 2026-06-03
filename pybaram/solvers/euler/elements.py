@@ -122,20 +122,24 @@ class EulerElements(BaseAdvecElements, FluidElements):
         self._const = cfg.items('constants')
 
     def construct_kernels(self, vertex, nreg, impl_op):
-        # Call paraent method
+        # Call parent method
         super().construct_kernels(vertex, nreg)
 
+        self._construct_impl_arrays(impl_op)
+
+        # Kernel to compute timestep
+        self.timestep = Kernel(*self._make_timestep(),
+                               self.upts_in, self.dt)
+
+    def _construct_impl_arrays(self, impl_op):
         if impl_op == 'spectral-radius':
             # Spectral radius on face
             self.fspr = self.be.alloc_array((self.nface, self.neles))
         elif impl_op == 'approx-jacobian':
             # Jacobian matrix on face
-            self.jmat = self.be.alloc_array((2, self.nfvars, self.nfvars, \
-                                             self.nface, self.neles))
-
-        # Kernel to compute timestep
-        self.timestep = Kernel(*self._make_timestep(),
-                               self.upts_in, self.dt)
+            self.jmat = self.be.alloc_array(
+                (2, self.nfvars, self.nfvars, self.nface, self.neles)
+            )
 
     def _make_timestep(self):
         # Dimensions
