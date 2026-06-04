@@ -193,6 +193,9 @@ where the Reynolds number is based on the body diameter :math:`D`.
 
 A fully turbulent RANS simulation is performed under supersonic conditions. The procedures to obtain a steady-state solution are presented as follows:
 
+Three-dimensional simulation
+----------------------------
+
 1. Convert mesh::
 
     user@Computer ~/pyBaram$ pybaram import hb2.cgns hb2.pbrm
@@ -218,3 +221,28 @@ A fully turbulent RANS simulation is performed under supersonic conditions. The 
    :align: center
 
    Mach contour around HB-2 model at :math:`M=2.0`.
+
+
+Axisymmetric simulation
+-----------------------
+
+Since the HB-2 model is an axisymmetric body at zero angle of attack, the same
+flow can also be computed with a two-dimensional axisymmetric mesh. The
+axisymmetric example files are located in ``examples/hb2/axi``. The
+configuration file uses ``axisymmetric-axis = x``, which means that the
+:math:`x` coordinate is the symmetry axis and the :math:`y` coordinate is the
+radial coordinate.
+
+The procedures to obtain the axisymmetric steady-state solution are as follows:
+
+1. Convert mesh::
+
+    user@Computer ~/pyBaram/examples/hb2/axi$ pybaram import hb2axi.cgns hb2axi.pbrm
+
+2. Run the simulation::
+
+    user@Computer ~/pyBaram/examples/hb2/axi$ pybaram run hb2axi.pbrm hb2axi.ini
+
+3. Convert the solution to a VTK file for visualization::
+
+    user@Computer ~/pyBaram/examples/hb2/axi$ pybaram export hb2axi.pbrm out-10000.pbrs out.vtu

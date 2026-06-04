@@ -110,6 +110,13 @@ class NavierStokesElements(BaseAdvecDiffElements, ViscousFluidElements):
         # Update arguments of post kernel
         self.post.update_args(self.upts_in, self.mu)
 
+        if getattr(self, '_is_axisymmetric', False):
+            div_args = (
+                *self._div_upts_args, self.upts_out, self.fpts,
+                self.upts_in, self.grad, self.mu
+            )
+            self.div_upts.update_args(*div_args)
+
         if not is_aux_initialized:
             # Initialize viscosity
             self.post()
@@ -183,6 +190,74 @@ class NavierStokesElements(BaseAdvecDiffElements, ViscousFluidElements):
                 dt[idx] = cfl*vol[idx] / max(lamc, 4*lamv)
 
         return self.be.make_loop(self.neles, timestep, smag, svec, vol)
+
+    def axisymmetric_source_container(self):
+        gamma = self._const['gamma']
+        ndims, nfvars = self.ndims, self.nfvars
+        ridx = self._axisymmetric_radius_idx
+        rad_mom_idx = ridx + 1
+
+        def src(u, g, mu, r, rhs):
+            rho = u[0]
+            inv_rho = 1/rho
+
+            ke = 0.0
+            divv = 0.0
+            vr = 0.0
+            for i in range(ndims):
+                vi = u[i + 1]*inv_rho
+                rhoi = g[i][0]
+                dvi_di = (g[i][i + 1] - vi*rhoi)*inv_rho
+
+                ke += u[i + 1]*u[i + 1]
+                divv += dvi_di
+                if i == ridx:
+                    vr = vi
+
+            p = (gamma - 1)*(u[nfvars - 1] - 0.5*ke/rho)
+            vr_r = vr/r
+            divv += vr_r
+            tau_tt = 2*mu*(vr_r - divv/3)
+
+            rhs[rad_mom_idx] += (p - tau_tt)/r
+
+        return self.be.compile(src)
+
+    def _make_div_upts(self):
+        if not getattr(self, '_is_axisymmetric', False):
+            return super()._make_div_upts()
+
+        # Global variables for compile
+        rcp_vol = self.be.convert_array(self.rcp_vol)
+        xc = self.be.convert_array(self.xc.T)
+        src, _ = self._source_exprs()
+        axisym_src = self.axisymmetric_source_container()
+        self._div_upts_args = (rcp_vol, xc)
+
+        args = 'rcp_vol, xc, rhs, fpts, upts, grad, mu'
+        f_txt = (
+            f"def _div_upts(i_begin, i_end, {args}, t=0):\n"
+            f"    for idx in range(i_begin, i_end):\n"
+            f"        rcp_voli = rcp_vol[idx]\n"
+        )
+
+        for j, s in enumerate(src):
+            subtxt = "+".join("fpts[{},{},idx]".format(i, j)
+                              for i in range(self.nface))
+            f_txt += "        rhs[{}, idx] = -rcp_voli*({}) + {}\n".format(
+                j, subtxt, s)
+
+        f_txt += (
+            f"        axisym_src(upts[:, idx], grad[:, :, idx], mu[idx], "
+            f"max(xc[{self._axisymmetric_radius_idx}, idx], 1e-300), "
+            f"rhs[:, idx])\n"
+        )
+
+        lvars = {}
+        exec(f_txt, {"np": np, "axisym_src": axisym_src}, lvars)
+
+        return self.be.make_loop(self.neles, lvars["_div_upts"],
+                                 rcp_vol, xc, src=f_txt)
 
     def make_wave_speed(self):
         # Dimensions and constants

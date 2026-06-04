@@ -36,6 +36,8 @@ class NavierStokesIntInters(BaseAdvecDiffIntInters):
         lidx = self.lidx
         ridx = self.ridx
         nf, sf = self.vec_snorm, self.mag_snorm
+        is_axi = getattr(self.ele0, '_is_axisymmetric', False)
+        rf = self.axisymmetric_radius if is_axi else self.mag_snorm
 
         # Compiler arguments
         array = self.be.local()
@@ -45,6 +47,8 @@ class NavierStokesIntInters(BaseAdvecDiffIntInters):
             'ndims' : ndims,
             'nfvars' : nfvars,
             'array' : array,
+            'axisymmetric' : is_axi,
+            'axisymmetric_radius_idx' : getattr(self.ele0, '_axisymmetric_radius_idx', 1),
             **self._const
         }
 
@@ -62,7 +66,7 @@ class NavierStokesIntInters(BaseAdvecDiffIntInters):
 
             wave_speed = self.ele0.make_wave_speed()
 
-            def comm_flux_spr(i_begin, i_end, lidx, ridx, nf, sf, rcp_dx, muf, gradf, uf, lam):
+            def comm_flux_spr(i_begin, i_end, lidx, ridx, nf, sf, rf, rcp_dx, muf, gradf, uf, lam):
                 for idx in range(i_begin, i_end):
                     fn = array((nfvars,), np.float64)
                     um = array((nfvars,), np.float64)
@@ -88,7 +92,10 @@ class NavierStokesIntInters(BaseAdvecDiffIntInters):
 
                     # Compute viscosity and viscous flux
                     muf[idx] = mu = compute_mu(um)
-                    visflux(um, gf, nfi, mu, fn)
+                    if is_axi:
+                        visflux(um, gf, nfi, mu, rf[idx], fn)
+                    else:
+                        visflux(um, gf, nfi, mu, fn)
 
                     # Compute wave speed on both cell
                     laml = wave_speed(ul, nfi, rcp_dxi, mu)
@@ -104,7 +111,7 @@ class NavierStokesIntInters(BaseAdvecDiffIntInters):
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
                         uf[rti][rfi, jdx, rei] = -fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux_spr, lidx, ridx, nf, sf, rcp_dx)
+            return self.be.make_loop(self.nfpts, comm_flux_spr, lidx, ridx, nf, sf, rf, rcp_dx)
         elif impl_op == 'approx-jacobian':
             from pybaram.solvers.euler.jacobian import make_convective_jacobian
             from pybaram.solvers.navierstokes.jacobian import get_viscous_jacobian
@@ -120,7 +127,7 @@ class NavierStokesIntInters(BaseAdvecDiffIntInters):
             # reciprocal of distance between two cells
             rcp_dx = self.rcp_dx
 
-            def comm_flux_ajac(i_begin, i_end, lidx, ridx, nf, sf, rcp_dx, muf, gradf, uf, jmats):
+            def comm_flux_ajac(i_begin, i_end, lidx, ridx, nf, sf, rf, rcp_dx, muf, gradf, uf, jmats):
                 for idx in range(i_begin, i_end):
                     fn = array((nfvars,), np.float64)
                     um = array((nfvars,), np.float64)
@@ -150,7 +157,10 @@ class NavierStokesIntInters(BaseAdvecDiffIntInters):
 
                     # Compute viscosity and viscous flux
                     muf[idx] = mu = compute_mu(um)
-                    visflux(um, gf, nfi, mu, fn)
+                    if is_axi:
+                        visflux(um, gf, nfi, mu, rf[idx], fn)
+                    else:
+                        visflux(um, gf, nfi, mu, fn)
 
                     # Compute Jacobian matrix on surface
                     # based on left/right cell
@@ -173,9 +183,9 @@ class NavierStokesIntInters(BaseAdvecDiffIntInters):
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
                         uf[rti][rfi, jdx, rei] = -fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux_ajac, lidx, ridx, nf, sf, rcp_dx)
+            return self.be.make_loop(self.nfpts, comm_flux_ajac, lidx, ridx, nf, sf, rf, rcp_dx)
         else:
-            def comm_flux(i_begin, i_end, lidx, ridx, nf, sf, muf, gradf, uf):
+            def comm_flux(i_begin, i_end, lidx, ridx, nf, sf, rf, muf, gradf, uf):
                 for idx in range(i_begin, i_end):
                     fn = array((nfvars,), np.float64)
                     um = array((nfvars,), np.float64)
@@ -200,14 +210,17 @@ class NavierStokesIntInters(BaseAdvecDiffIntInters):
 
                     # Compute viscosity and viscous flux
                     muf[idx] = mu = compute_mu(um)
-                    visflux(um, gf, nfi, mu, fn)
+                    if is_axi:
+                        visflux(um, gf, nfi, mu, rf[idx], fn)
+                    else:
+                        visflux(um, gf, nfi, mu, fn)
 
                     for jdx in range(nfvars):
                         # Save it at left and right solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
                         uf[rti][rfi, jdx, rei] = -fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux, lidx, ridx, nf, sf)
+            return self.be.make_loop(self.nfpts, comm_flux, lidx, ridx, nf, sf, rf)
 
 
 class NavierStokesMPIInters(BaseAdvecDiffMPIInters):
@@ -236,6 +249,8 @@ class NavierStokesMPIInters(BaseAdvecDiffMPIInters):
         ndims, nfvars = self.ndims, self.nfvars
         lidx = self.lidx
         nf, sf = self.vec_snorm, self.mag_snorm
+        is_axi = getattr(self.ele0, '_is_axisymmetric', False)
+        rf = self.axisymmetric_radius if is_axi else self.mag_snorm
 
         # Compiler arguments
         array = self.be.local()
@@ -245,6 +260,8 @@ class NavierStokesMPIInters(BaseAdvecDiffMPIInters):
             'ndims' : ndims,
             'nfvars' : nfvars,
             'array' : array,
+            'axisymmetric' : is_axi,
+            'axisymmetric_radius_idx' : getattr(self.ele0, '_axisymmetric_radius_idx', 1),
             **self._const
         }
 
@@ -263,7 +280,7 @@ class NavierStokesMPIInters(BaseAdvecDiffMPIInters):
             # Get wave speed function
             wave_speed = self.ele0.make_wave_speed()
 
-            def comm_flux_spr(i_begin, i_end, lidx, nf, sf, rcp_dx, muf, gradf, rhs, uf, lam):
+            def comm_flux_spr(i_begin, i_end, lidx, nf, sf, rf, rcp_dx, muf, gradf, rhs, uf, lam):
                 for idx in range(i_begin, i_end):
                     fn = array((nfvars,), np.float64)
                     um = array((nfvars,), np.float64)
@@ -288,7 +305,10 @@ class NavierStokesMPIInters(BaseAdvecDiffMPIInters):
                     
                     # Compute viscosity and viscous flux
                     muf[idx] = mu = compute_mu(um)
-                    visflux(um, gf, nfi, mu, fn)
+                    if is_axi:
+                        visflux(um, gf, nfi, mu, rf[idx], fn)
+                    else:
+                        visflux(um, gf, nfi, mu, fn)
 
                     # Compute spectral radius on face
                     lami = wave_speed(ul, nfi, rcp_dxi, mu)
@@ -298,7 +318,7 @@ class NavierStokesMPIInters(BaseAdvecDiffMPIInters):
                         # Save it at left solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux_spr, lidx, nf, sf, rcp_dx)
+            return self.be.make_loop(self.nfpts, comm_flux_spr, lidx, nf, sf, rf, rcp_dx)
         elif impl_op == 'approx-jacobian':
             from pybaram.solvers.euler.jacobian import make_convective_jacobian
             from pybaram.solvers.navierstokes.jacobian import get_viscous_jacobian
@@ -312,7 +332,7 @@ class NavierStokesMPIInters(BaseAdvecDiffMPIInters):
             # reciprocal of distance between two cells
             rcp_dx = self.rcp_dx
 
-            def comm_flux_ajac(i_begin, i_end, lidx, nf, sf, rcp_dx, muf, gradf, rhs, uf, jmats):
+            def comm_flux_ajac(i_begin, i_end, lidx, nf, sf, rf, rcp_dx, muf, gradf, rhs, uf, jmats):
                 for idx in range(i_begin, i_end):
                     fn = array((nfvars,), np.float64)
                     um = array((nfvars,), np.float64)
@@ -340,7 +360,10 @@ class NavierStokesMPIInters(BaseAdvecDiffMPIInters):
                     
                     # Compute viscosity and viscous flux
                     muf[idx] = mu = compute_mu(um)
-                    visflux(um, gf, nfi, mu, fn)
+                    if is_axi:
+                        visflux(um, gf, nfi, mu, rf[idx], fn)
+                    else:
+                        visflux(um, gf, nfi, mu, fn)
 
                     # Compute Jacobian matrix on surface
                     pos_jacobian(ul, nfi, ap)
@@ -355,9 +378,9 @@ class NavierStokesMPIInters(BaseAdvecDiffMPIInters):
                         # Save it at left solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux_ajac, lidx, nf, sf, rcp_dx)
+            return self.be.make_loop(self.nfpts, comm_flux_ajac, lidx, nf, sf, rf, rcp_dx)
         else:        
-            def comm_flux(i_begin, i_end, lidx, nf, sf, muf, gradf, rhs, uf):
+            def comm_flux(i_begin, i_end, lidx, nf, sf, rf, muf, gradf, rhs, uf):
                 for idx in range(i_begin, i_end):
                     fn = array((nfvars,), np.float64)
                     um = array((nfvars,), np.float64)
@@ -381,13 +404,16 @@ class NavierStokesMPIInters(BaseAdvecDiffMPIInters):
                     
                     # Compute viscosity and viscous flux
                     muf[idx] = mu = compute_mu(um)
-                    visflux(um, gf, nfi, mu, fn)
+                    if is_axi:
+                        visflux(um, gf, nfi, mu, rf[idx], fn)
+                    else:
+                        visflux(um, gf, nfi, mu, fn)
 
                     for jdx in range(nfvars):
                         # Save it at left solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux, lidx, nf, sf)
+            return self.be.make_loop(self.nfpts, comm_flux, lidx, nf, sf, rf)
 
 
 class NavierStokesBCInters(BaseAdvecDiffBCInters):
@@ -417,6 +443,8 @@ class NavierStokesBCInters(BaseAdvecDiffBCInters):
         ndims, nfvars = self.ndims, self.nfvars
         lidx = self.lidx
         nf, sf = self.vec_snorm, self.mag_snorm
+        is_axi = getattr(self.ele0, '_is_axisymmetric', False)
+        rf = self.axisymmetric_radius if is_axi else self.mag_snorm
 
         # Compiler arguments
         array = self.be.local()
@@ -426,6 +454,8 @@ class NavierStokesBCInters(BaseAdvecDiffBCInters):
             'ndims' : ndims,
             'nfvars' : nfvars,
             'array' : array,
+            'axisymmetric' : is_axi,
+            'axisymmetric_radius_idx' : getattr(self.ele0, '_axisymmetric_radius_idx', 1),
             **self._const
         }
 
@@ -445,7 +475,7 @@ class NavierStokesBCInters(BaseAdvecDiffBCInters):
 
             wave_speed = self.ele0.make_wave_speed()
             
-            def comm_flux_spr(i_begin, i_end, lidx, nf, sf, rcp_dx, muf, gradf, uf, lam):
+            def comm_flux_spr(i_begin, i_end, lidx, nf, sf, rf, rcp_dx, muf, gradf, uf, lam):
                 for idx in range(i_begin, i_end):
                     ur = array((nfvars,), np.float64)
                     um = array((nfvars,), np.float64)
@@ -474,7 +504,10 @@ class NavierStokesBCInters(BaseAdvecDiffBCInters):
                     
                     # Compute viscosity and viscous flux
                     muf[idx] = mu = compute_mu(um)
-                    visflux(um, gf, nfi, mu, fn)
+                    if is_axi:
+                        visflux(um, gf, nfi, mu, rf[idx], fn)
+                    else:
+                        visflux(um, gf, nfi, mu, fn)
 
                     # Compute spectral radius on face
                     lami = wave_speed(ul, nfi, rcp_dxi, mu)
@@ -484,7 +517,7 @@ class NavierStokesBCInters(BaseAdvecDiffBCInters):
                         # Save it at left solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux_spr, lidx, nf, sf, rcp_dx)
+            return self.be.make_loop(self.nfpts, comm_flux_spr, lidx, nf, sf, rf, rcp_dx)
         elif impl_op == 'approx-jacobian':
             from pybaram.solvers.euler.jacobian import make_convective_jacobian
             from pybaram.solvers.navierstokes.jacobian import get_viscous_jacobian
@@ -498,7 +531,7 @@ class NavierStokesBCInters(BaseAdvecDiffBCInters):
             # reciprocal of distance between two cells
             rcp_dx = self.rcp_dx
 
-            def comm_flux_ajac(i_begin, i_end, lidx, nf, sf, rcp_dx, muf, gradf, uf, jmats):
+            def comm_flux_ajac(i_begin, i_end, lidx, nf, sf, rf, rcp_dx, muf, gradf, uf, jmats):
                 for idx in range(i_begin, i_end):
                     ur = array((nfvars,), np.float64)
                     um = array((nfvars,), np.float64)
@@ -530,7 +563,10 @@ class NavierStokesBCInters(BaseAdvecDiffBCInters):
                     
                     # Compute viscosity and viscous flux
                     muf[idx] = mu = compute_mu(um)
-                    visflux(um, gf, nfi, mu, fn)
+                    if is_axi:
+                        visflux(um, gf, nfi, mu, rf[idx], fn)
+                    else:
+                        visflux(um, gf, nfi, mu, fn)
 
                     # Compute Jacobian matrix on surface
                     pos_jacobian(ul, nfi, ap)
@@ -545,9 +581,9 @@ class NavierStokesBCInters(BaseAdvecDiffBCInters):
                         # Save it at left solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux_ajac, lidx, nf, sf, rcp_dx)
+            return self.be.make_loop(self.nfpts, comm_flux_ajac, lidx, nf, sf, rf, rcp_dx)
         else:
-            def comm_flux(i_begin, i_end, lidx, nf, sf, muf, gradf, uf):
+            def comm_flux(i_begin, i_end, lidx, nf, sf, rf, muf, gradf, uf):
                 for idx in range(i_begin, i_end):
                     ur = array((nfvars,), np.float64)
                     um = array((nfvars,), np.float64)
@@ -575,13 +611,16 @@ class NavierStokesBCInters(BaseAdvecDiffBCInters):
                     
                     # Compute viscosity and viscous flux
                     muf[idx] = mu = compute_mu(um)
-                    visflux(um, gf, nfi, mu, fn)
+                    if is_axi:
+                        visflux(um, gf, nfi, mu, rf[idx], fn)
+                    else:
+                        visflux(um, gf, nfi, mu, fn)
 
                     for jdx in range(nfvars):
                         # Save it at left solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-        return self.be.make_loop(self.nfpts, comm_flux, lidx, nf, sf)
+        return self.be.make_loop(self.nfpts, comm_flux, lidx, nf, sf, rf)
 
     def _make_spec_rad(self):
         lidx = self.lidx

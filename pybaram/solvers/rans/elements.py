@@ -181,13 +181,47 @@ class RANSElements(BaseAdvecDiffElements):
 
         return self.be.make_loop(self.neles, _cal_recon, op)
 
+    def axisymmetric_source_container(self):
+        gamma = self._const['gamma']
+        ndims, nfvars = self.ndims, self.nfvars
+        ridx = self._axisymmetric_radius_idx
+        rad_mom_idx = ridx + 1
+
+        def src(u, g, mu, mut, r, rhs):
+            rho = u[0]
+            inv_rho = 1/rho
+
+            ke = 0.0
+            divv = 0.0
+            vr = 0.0
+            for i in range(ndims):
+                vi = u[i + 1]*inv_rho
+                rhoi = g[i][0]
+                dvi_di = (g[i][i + 1] - vi*rhoi)*inv_rho
+
+                ke += u[i + 1]*u[i + 1]
+                divv += dvi_di
+                if i == ridx:
+                    vr = vi
+
+            p = (gamma - 1)*(u[nfvars - 1] - 0.5*ke/rho)
+            vr_r = vr/r
+            divv += vr_r
+            tau_tt = 2*(mu + mut)*(vr_r - divv/3)
+
+            rhs[rad_mom_idx] += (p - tau_tt)/r
+
+        return self.be.compile(src)
+
     def _make_div_upts(self):
         turb_src = self.turb_src_container()
         src, has_xc = self._source_exprs()
+        is_axi = getattr(self, '_is_axisymmetric', False)
+        axisym_src = self.axisymmetric_source_container() if is_axi else None
 
         rcp_vol = self.be.convert_array(self.rcp_vol)
         args = 'rcp_vol, rhs, fpts, upts, grad, dsrc, mu, mut, ydist'
-        if has_xc:
+        if has_xc or is_axi:
             xc = self.be.convert_array(self.xc.T)
             self._div_upts_args = (rcp_vol, xc)
             args = 'rcp_vol, xc, rhs, fpts, upts, grad, dsrc, mu, mut, ydist'
@@ -199,11 +233,20 @@ class RANSElements(BaseAdvecDiffElements):
             f"    for idx in range(i_begin, i_end):\n"
             f"        rcp_voli = rcp_vol[idx]\n"
         )
+
         for j, s in enumerate(src):
             subtxt = "+".join("fpts[{},{},idx]".format(i, j)
                               for i in range(self.nface))
             f_txt += "        rhs[{}, idx] = -rcp_voli*({}) + {}\n".format(
                 j, subtxt, s)
+
+        if is_axi:
+            f_txt += (
+                f"        axisym_src(upts[:, idx], grad[:, :, idx], "
+                f"mu[idx], mut[idx], "
+                f"max(xc[{self._axisymmetric_radius_idx}, idx], 1e-300), "
+                f"rhs[:, idx])\n"
+            )
 
         f_txt += (
             f"\n"
@@ -213,10 +256,13 @@ class RANSElements(BaseAdvecDiffElements):
         )
 
         lvars = {}
-        exec(f_txt, {"np": np, "turb_src": turb_src}, lvars)
+        exec(
+            f_txt, {"np": np, "turb_src": turb_src, "axisym_src": axisym_src},
+            lvars
+        )
 
         # Compile the function
-        if has_xc:
+        if has_xc or is_axi:
             return self.be.make_loop(self.neles, lvars["_div_upts"],
                                      rcp_vol, xc, src=f_txt)
         else:

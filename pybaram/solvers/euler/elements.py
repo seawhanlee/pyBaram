@@ -174,6 +174,62 @@ class EulerElements(BaseAdvecElements, FluidElements):
 
         return self.be.make_loop(self.neles, timestep, smag, svec, vol)
 
+    def axisymmetric_source_container(self):
+        gamma = self._const['gamma']
+        ndims, nfvars = self.ndims, self.nfvars
+        rad_mom_idx = self._axisymmetric_radius_idx + 1
+
+        def src(u, r, rhs):
+            rho = u[0]
+            ke = 0.0
+            for i in range(ndims):
+                ke += u[i + 1]*u[i + 1]
+
+            p = (gamma - 1)*(u[nfvars - 1] - 0.5*ke/rho)
+            rhs[rad_mom_idx] += p/r
+
+        return self.be.compile(src)
+
+    def _make_div_upts(self):
+        if not getattr(self, '_is_axisymmetric', False):
+            return super()._make_div_upts()
+
+        # Global variables for compile
+        rcp_vol = self.be.convert_array(self.rcp_vol)
+        src, _ = self._source_exprs()
+        axisym_src = self.axisymmetric_source_container()
+
+        # Axisymmetric finite-volume form uses r-weighted face fluxes and
+        # volumes.  The remaining geometric pressure term is p/r in the
+        # radial momentum equation.
+        args = 'rcp_vol, xc, rhs, fpts, upts'
+        f_txt = (
+            f"def _div_upts(i_begin, i_end, {args}, t=0):\n"
+            f"    for idx in range(i_begin, i_end): \n"
+            f"        rcp_voli = rcp_vol[idx]\n"
+        )
+
+        for j, s in enumerate(src):
+            subtxt = "+".join("fpts[{},{},idx]".format(i, j)
+                              for i in range(self.nface))
+            f_txt += "        rhs[{}, idx] = -rcp_voli*({}) + {}\n".format(
+                j, subtxt, s)
+
+        f_txt += (
+            f"        axisym_src(upts[:, idx], "
+            f"max(xc[{self._axisymmetric_radius_idx}, idx], {eps}), "
+            f"rhs[:, idx])\n"
+        )
+
+        # Execute python function and save in lvars
+        lvars = {}
+        exec(f_txt, {"np": np, "axisym_src": axisym_src}, lvars)
+
+        # Compile the function
+        xc = self.be.convert_array(self.xc.T)
+        return self.be.make_loop(self.neles, lvars["_div_upts"],
+                                 rcp_vol, xc, src=f_txt)
+
     def make_wave_speed(self):
         # Dimensions and constants
         ndims, nfvars = self.ndims, self.nfvars

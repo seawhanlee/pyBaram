@@ -94,6 +94,77 @@ Turbulent thermal conductivity is computed using turbulent Prandtl number :math:
 .. math::
    \Theta_x = u \tau_{xx} + v \tau_{xy} + w \tau_{xz} + \gamma \left(\frac{\mu}{Pr} + \frac{\mu_t}{Pr_t} \right) T_x
 
+Axisymmetric Equations
+----------------------
+``pyBaram`` can solve two-dimensional no-swirl axisymmetric Euler,
+Navier-Stokes, and RANS equations. Let :math:`x_a` denote the coordinate along
+the axis of symmetry and :math:`r` denote the radial coordinate. The
+corresponding velocity components are :math:`u_a` and :math:`u_r`,
+respectively. The factor :math:`2\pi` is omitted because it cancels out in the
+finite-volume residual and in normalized quantities.
+
+The conservative variable vector for the flow equations is written as
+
+.. math::
+   U = \begin{bmatrix}
+    \rho \\ \rho u_a \\ \rho u_r \\ \rho e_t
+   \end{bmatrix}.
+
+The axisymmetric conservation law is integrated in the following conservative
+form:
+
+.. math::
+   \frac{\partial}{\partial t} \int_{\Omega} r U \, dA
+   + \int_{\partial \Omega} r (F_c - F_v) \cdot \vec{n} \, d\Gamma
+   = \int_{\Omega} S_{\mathrm{axi}} \, dA .
+
+For the Euler equations, the remaining geometric source term appears only in
+the radial momentum equation:
+
+.. math::
+   S_{\mathrm{axi}} =
+   \begin{bmatrix}
+    0 \\ 0 \\ p \\ 0
+   \end{bmatrix}.
+
+For Navier-Stokes equations, the axisymmetric divergence of velocity is
+
+.. math::
+   \nabla \cdot \vec{u}
+   = \frac{\partial u_a}{\partial x_a}
+   + \frac{\partial u_r}{\partial r}
+   + \frac{u_r}{r}.
+
+The circumferential normal stress is then
+
+.. math::
+   \tau_{\theta\theta}
+   = 2\mu \left(\frac{u_r}{r}
+   - \frac{1}{3} \nabla \cdot \vec{u} \right),
+
+and the axisymmetric source term becomes
+
+.. math::
+   S_{\mathrm{axi}} =
+   \begin{bmatrix}
+    0 \\ 0 \\ p - \tau_{\theta\theta} \\ 0
+   \end{bmatrix}.
+
+For RANS equations, the same form is used with the effective viscosity
+:math:`\mu+\mu_t` in the stress tensor:
+
+.. math::
+   \tau_{\theta\theta}
+   = 2(\mu+\mu_t) \left(\frac{u_r}{r}
+   - \frac{1}{3} \nabla \cdot \vec{u} \right).
+
+In the cell-centered finite-volume discretization, the cell volume and face
+area are replaced by their radius-weighted counterparts,
+:math:`\Delta V_{\mathrm{axi}} \simeq r_i \Delta A_i` and
+:math:`\Delta A_{\mathrm{axi},f} \simeq r_f \Delta \Gamma_f`,
+respectively. Surface and force integrations over axisymmetric boundaries use
+the same radius-weighted face measure.
+
 Finite Volume Method
 =====================
 Cell-centered finite volume method is employed to discretize in space. 
