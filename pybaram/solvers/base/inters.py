@@ -34,6 +34,15 @@ class BaseInters:
         self.mag_snorm = be.convert_array(self.raw_mag_snorm)
         self.vec_snorm = be.convert_array(self.raw_vec_snorm)
 
+        if getattr(ele0, '_is_axisymmetric', False):
+            ridx = ele0._axisymmetric_radius_idx
+            self.raw_axisymmetric_radius = np.maximum(
+                self._get_fpts('xf', elemap)[ridx], 1e-300
+            )
+            self.axisymmetric_radius = be.convert_array(
+                self.raw_axisymmetric_radius
+            )
+
     def _get_fpts(self, meth, elemap):
         # Get element property at face and sort it
         emap = {k: getattr(ele, meth) for k, ele in elemap.items()}

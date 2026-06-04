@@ -206,6 +206,16 @@ Type of equations and spatial discretization schemes are configured as follows.
 
    ``constant`` | ``sutherland``
 
+8. axisymmetric-axis --- axis of symmetry for two-dimensional no-swirl
+   axisymmetric simulations. If this option is not specified, the problem is
+   treated as a Cartesian two- or three-dimensional simulation.
+
+   ``x`` | ``y``
+
+   For example, ``axisymmetric-axis = x`` means that the computational
+   :math:`y` coordinate is the radial coordinate. Euler, Navier-Stokes, and
+   RANS systems support this option.
+
 Example::
 
     [solver]
@@ -215,6 +225,7 @@ Example::
     u2k = 5.0
     riemann-solver = ausmpw+
     viscosity = sutherland
+    axisymmetric-axis = x
 
 [solver-viscosity-sutherland]
 *****************************
@@ -626,6 +637,11 @@ Examples::
 **************************
 This plugin computes aerodynamic force and moment coefficients along surface labelled `name`.
 
+For axisymmetric simulations, the force and moment are integrated over one
+radian in the azimuthal direction. The reference ``area`` should also correspond
+to one radian. Multiply the resulting dimensional force or moment by
+:math:`2\pi` to obtain the full revolved-surface value.
+
 1. ``iter-out`` --- compute forces for every `iter-out` for steady simulation
 
     `int`
@@ -696,6 +712,10 @@ Examples::
 [soln-plugin-surface-`name`]
 ****************************
 This plugin integrates variables along the surface labeled as `name`. It provides both integrated and averaged values.
+
+For axisymmetric simulations, the reported integrated value is over one radian
+in the azimuthal direction. Multiply by :math:`2\pi` to obtain the full
+revolved-surface integral.
 
 1. ``iter-out`` --- compute forces for every `iter-out` for steady simulation
 

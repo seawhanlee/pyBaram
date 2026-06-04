@@ -45,6 +45,8 @@ class RANSIntInters(BaseAdvecDiffIntInters):
         lidx = self.lidx
         ridx = self.ridx
         nf, sf = self.vec_snorm, self.mag_snorm
+        is_axi = getattr(self.ele0, '_is_axisymmetric', False)
+        rf = self.axisymmetric_radius if is_axi else self.mag_snorm
         ydist = self.ydist
 
         # Compiler arguments
@@ -55,6 +57,8 @@ class RANSIntInters(BaseAdvecDiffIntInters):
             'ndims' : ndims,
             'nfvars' : nfvars,
             'array' : array,
+            'axisymmetric' : is_axi,
+            'axisymmetric_radius_idx' : getattr(self.ele0, '_axisymmetric_radius_idx', 1),
             **self._const
         }
 
@@ -78,7 +82,7 @@ class RANSIntInters(BaseAdvecDiffIntInters):
             wave_speed = self.ele0.make_wave_speed()
             twave_speed = self.ele0.make_turb_wave_speed()
 
-            def comm_flux_spr(i_begin, i_end, lidx, ridx, nf, sf, rcp_dx, ydist, muf, gradf, uf, lam, tlam):
+            def comm_flux_spr(i_begin, i_end, lidx, ridx, nf, sf, rf, rcp_dx, ydist, muf, gradf, uf, lam, tlam):
                 for idx in range(i_begin, i_end):
                     fn = array((nvars,), np.float64)
                     um = array((nvars,), np.float64)
@@ -106,7 +110,10 @@ class RANSIntInters(BaseAdvecDiffIntInters):
                     # Compute viscosity and viscous flux
                     muf[0, idx] = mu = compute_mu(um)
                     muf[1, idx] = mut = compute_mut(um, gf, mu, ydnsi)
-                    visflux(um, gf, nfi, mu, mut, fn)
+                    if is_axi:
+                        visflux(um, gf, nfi, mu, mut, rf[idx], fn)
+                    else:
+                        visflux(um, gf, nfi, mu, mut, fn)
 
                     # Compute turbulent flux
                     tflux(ul, ur, um, gf, nfi, ydnsi, mu, mut, fn)
@@ -130,7 +137,7 @@ class RANSIntInters(BaseAdvecDiffIntInters):
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
                         uf[rti][rfi, jdx, rei] = -fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux_spr, lidx, ridx, nf, sf, rcp_dx, ydist)
+            return self.be.make_loop(self.nfpts, comm_flux_spr, lidx, ridx, nf, sf, rf, rcp_dx, ydist)
         elif impl_op == 'approx-jacobian':
             from pybaram.solvers.euler.jacobian import make_convective_jacobian
             from pybaram.solvers.navierstokes.jacobian import get_viscous_jacobian
@@ -150,7 +157,7 @@ class RANSIntInters(BaseAdvecDiffIntInters):
             # reciprocal of distance between two cells
             rcp_dx = self.rcp_dx
 
-            def comm_flux_ajac(i_begin, i_end, lidx, ridx, nf, sf, rcp_dx, ydist, muf, gradf, uf, jmats, tjmats):
+            def comm_flux_ajac(i_begin, i_end, lidx, ridx, nf, sf, rf, rcp_dx, ydist, muf, gradf, uf, jmats, tjmats):
                 for idx in range(i_begin, i_end):
                     fn = array((nvars,), np.float64)
                     um = array((nvars,), np.float64)
@@ -184,7 +191,10 @@ class RANSIntInters(BaseAdvecDiffIntInters):
                     # Compute viscosity and viscous flux
                     muf[0, idx] = mu = compute_mu(um)
                     muf[1, idx] = mut = compute_mut(um, gf, mu, ydnsi)
-                    visflux(um, gf, nfi, mu, mut, fn)
+                    if is_axi:
+                        visflux(um, gf, nfi, mu, mut, rf[idx], fn)
+                    else:
+                        visflux(um, gf, nfi, mu, mut, fn)
 
                     # Compute turbulent flux
                     tflux(ul, ur, um, gf, nfi, ydnsi, mu, mut, fn)
@@ -219,9 +229,9 @@ class RANSIntInters(BaseAdvecDiffIntInters):
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
                         uf[rti][rfi, jdx, rei] = -fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux_ajac, lidx, ridx, nf, sf, rcp_dx, ydist)
+            return self.be.make_loop(self.nfpts, comm_flux_ajac, lidx, ridx, nf, sf, rf, rcp_dx, ydist)
         else:
-            def comm_flux(i_begin, i_end, lidx, ridx, nf, sf, ydist, muf, gradf, uf):
+            def comm_flux(i_begin, i_end, lidx, ridx, nf, sf, rf, ydist, muf, gradf, uf):
                 for idx in range(i_begin, i_end):
                     fn = array((nvars,), np.float64)
                     um = array((nvars,), np.float64)
@@ -248,7 +258,10 @@ class RANSIntInters(BaseAdvecDiffIntInters):
                     # Compute viscosity and viscous flux
                     muf[0, idx] = mu = compute_mu(um)
                     muf[1, idx] = mut = compute_mut(um, gf, mu, ydnsi)
-                    visflux(um, gf, nfi, mu, mut, fn)
+                    if is_axi:
+                        visflux(um, gf, nfi, mu, mut, rf[idx], fn)
+                    else:
+                        visflux(um, gf, nfi, mu, mut, fn)
 
                     # Compute turbulent flux
                     tflux(ul, ur, um, gf, nfi, ydnsi, mu, mut, fn)
@@ -258,7 +271,7 @@ class RANSIntInters(BaseAdvecDiffIntInters):
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
                         uf[rti][rfi, jdx, rei] = -fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux, lidx, ridx, nf, sf, ydist)
+            return self.be.make_loop(self.nfpts, comm_flux, lidx, ridx, nf, sf, rf, ydist)
 
 
 class RANSMPIInters(BaseAdvecDiffMPIInters):
@@ -296,6 +309,8 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
 
         lidx = self.lidx
         nf, sf = self.vec_snorm, self.mag_snorm
+        is_axi = getattr(self.ele0, '_is_axisymmetric', False)
+        rf = self.axisymmetric_radius if is_axi else self.mag_snorm
         ydist = self.ydist
 
         # Compiler arguments
@@ -306,6 +321,8 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
             'ndims' : ndims,
             'nfvars' : nfvars,
             'array' : array,
+            'axisymmetric' : is_axi,
+            'axisymmetric_radius_idx' : getattr(self.ele0, '_axisymmetric_radius_idx', 1),
             **self._const
         }
 
@@ -329,7 +346,7 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
             wave_speed = self.ele0.make_wave_speed()
             twave_speed = self.ele0.make_turb_wave_speed()
 
-            def comm_flux_spr(i_begin, i_end, lidx, nf, sf, rcp_dx, ydist, muf, gradf, rhs, uf, lam, tlam):
+            def comm_flux_spr(i_begin, i_end, lidx, nf, sf, rf, rcp_dx, ydist, muf, gradf, rhs, uf, lam, tlam):
                 for idx in range(i_begin, i_end):
                     fn = array((nvars,), np.float64)
                     um = array((nvars,), np.float64)
@@ -356,7 +373,10 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
                     # Compute viscosity and viscous flux
                     muf[0, idx] = mu = compute_mu(um)
                     muf[1, idx] = mut = compute_mut(um, gf, mu, ydnsi)
-                    visflux(um, gf, nfi, mu, mut, fn)
+                    if is_axi:
+                        visflux(um, gf, nfi, mu, mut, rf[idx], fn)
+                    else:
+                        visflux(um, gf, nfi, mu, mut, fn)
 
                     # Compute turbulent flux
                     tflux(ul, ur, um, gf, nfi, ydnsi, mu, mut, fn)
@@ -373,7 +393,7 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
                         # Save it at left solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux_spr, lidx, nf, sf, rcp_dx, ydist)
+            return self.be.make_loop(self.nfpts, comm_flux_spr, lidx, nf, sf, rf, rcp_dx, ydist)
         elif impl_op == 'approx-jacobian':
             from pybaram.solvers.euler.jacobian import make_convective_jacobian
             from pybaram.solvers.navierstokes.jacobian import get_viscous_jacobian
@@ -391,7 +411,7 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
             vis_jacobian = get_viscous_jacobian(vistype, self.be, cplargs)
             turb_jacobian = self.ele0.make_turb_jacobian()
 
-            def comm_flux_ajac(i_begin, i_end, lidx, nf, sf, rcp_dx, ydist, muf, gradf, rhs, uf, jmats, tjmats):
+            def comm_flux_ajac(i_begin, i_end, lidx, nf, sf, rf, rcp_dx, ydist, muf, gradf, rhs, uf, jmats, tjmats):
                 for idx in range(i_begin, i_end):
                     fn = array((nvars,), np.float64)
                     um = array((nvars,), np.float64)
@@ -421,7 +441,10 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
                     # Compute viscosity and viscous flux
                     muf[0, idx] = mu = compute_mu(um)
                     muf[1, idx] = mut = compute_mut(um, gf, mu, ydnsi)
-                    visflux(um, gf, nfi, mu, mut, fn)
+                    if is_axi:
+                        visflux(um, gf, nfi, mu, mut, rf[idx], fn)
+                    else:
+                        visflux(um, gf, nfi, mu, mut, fn)
 
                     # Compute turbulent flux
                     tflux(ul, ur, um, gf, nfi, ydnsi, mu, mut, fn)
@@ -445,9 +468,9 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
                         # Save it at left solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux_ajac, lidx, nf, sf, rcp_dx, ydist)
+            return self.be.make_loop(self.nfpts, comm_flux_ajac, lidx, nf, sf, rf, rcp_dx, ydist)
         else:
-            def comm_flux(i_begin, i_end, lidx, nf, sf, ydist, muf, gradf, rhs, uf):
+            def comm_flux(i_begin, i_end, lidx, nf, sf, rf, ydist, muf, gradf, rhs, uf):
                 for idx in range(i_begin, i_end):
                     fn = array((nvars,), np.float64)
                     um = array((nvars,), np.float64)
@@ -473,7 +496,10 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
                     # Compute viscosity and viscous flux
                     muf[0, idx] = mu = compute_mu(um)
                     muf[1, idx] = mut = compute_mut(um, gf, mu, ydnsi)
-                    visflux(um, gf, nfi, mu, mut, fn)
+                    if is_axi:
+                        visflux(um, gf, nfi, mu, mut, rf[idx], fn)
+                    else:
+                        visflux(um, gf, nfi, mu, mut, fn)
 
                     # Compute turbulent flux
                     tflux(ul, ur, um, gf, nfi, ydnsi, mu, mut, fn)
@@ -482,7 +508,7 @@ class RANSMPIInters(BaseAdvecDiffMPIInters):
                         # Save it at left solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux, lidx, nf, sf, ydist)
+            return self.be.make_loop(self.nfpts, comm_flux, lidx, nf, sf, rf, ydist)
  
 
 class RANSBCInters(BaseAdvecDiffBCInters):
@@ -571,6 +597,8 @@ class RANSBCInters(BaseAdvecDiffBCInters):
 
         lidx = self.lidx
         nf, sf = self.vec_snorm, self.mag_snorm
+        is_axi = getattr(self.ele0, '_is_axisymmetric', False)
+        rf = self.axisymmetric_radius if is_axi else self.mag_snorm
         ydist = self.ydist
 
         # Compiler arguments
@@ -581,6 +609,8 @@ class RANSBCInters(BaseAdvecDiffBCInters):
             'ndims' : ndims,
             'nfvars' : nfvars,
             'array' : array,
+            'axisymmetric' : is_axi,
+            'axisymmetric_radius_idx' : getattr(self.ele0, '_axisymmetric_radius_idx', 1),
             **self._const
         }
 
@@ -607,7 +637,7 @@ class RANSBCInters(BaseAdvecDiffBCInters):
             wave_speed = self.ele0.make_wave_speed()
             twave_speed = self.ele0.make_turb_wave_speed()
 
-            def comm_flux_spr(i_begin, i_end, lidx, nf, sf, rcp_dx, ydist, muf, gradf, uf, lam, tlam):
+            def comm_flux_spr(i_begin, i_end, lidx, nf, sf, rf, rcp_dx, ydist, muf, gradf, uf, lam, tlam):
                 for idx in range(i_begin, i_end):
                     fn = array((nvars,), np.float64)
                     um = array((nvars,), np.float64)
@@ -641,7 +671,10 @@ class RANSBCInters(BaseAdvecDiffBCInters):
                     # Compute viscosity and viscous flux
                     muf[0, idx] = mu = compute_mu(um)
                     muf[1, idx] = mut = compute_mut(um, gf, mu, ydnsi)
-                    visflux(um, gf, nfi, mu, mut, fn)
+                    if is_axi:
+                        visflux(um, gf, nfi, mu, mut, rf[idx], fn)
+                    else:
+                        visflux(um, gf, nfi, mu, mut, fn)
 
                     # Compute turbulent flux
                     tflux(ul, ur, um, gf, nfi, ydnsi, mu, mut, fn)
@@ -658,7 +691,7 @@ class RANSBCInters(BaseAdvecDiffBCInters):
                         # Save it at left solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux_spr, lidx, nf, sf, rcp_dx, ydist)
+            return self.be.make_loop(self.nfpts, comm_flux_spr, lidx, nf, sf, rf, rcp_dx, ydist)
         elif impl_op == 'approx-jacobian':
             from pybaram.solvers.euler.jacobian import make_convective_jacobian
             from pybaram.solvers.navierstokes.jacobian import get_viscous_jacobian
@@ -676,7 +709,7 @@ class RANSBCInters(BaseAdvecDiffBCInters):
             vis_jacobian = get_viscous_jacobian(vistype, self.be, cplargs)
             turb_jacobian = self.ele0.make_turb_jacobian()
 
-            def comm_flux_ajac(i_begin, i_end, lidx, nf, sf, rcp_dx, ydist, muf, gradf, uf, jmats, tjmats):
+            def comm_flux_ajac(i_begin, i_end, lidx, nf, sf, rf, rcp_dx, ydist, muf, gradf, uf, jmats, tjmats):
                 for idx in range(i_begin, i_end):
                     fn = array((nvars,), np.float64)
                     um = array((nvars,), np.float64)
@@ -713,7 +746,10 @@ class RANSBCInters(BaseAdvecDiffBCInters):
                     # Compute viscosity and viscous flux
                     muf[0, idx] = mu = compute_mu(um)
                     muf[1, idx] = mut = compute_mut(um, gf, mu, ydnsi)
-                    visflux(um, gf, nfi, mu, mut, fn)
+                    if is_axi:
+                        visflux(um, gf, nfi, mu, mut, rf[idx], fn)
+                    else:
+                        visflux(um, gf, nfi, mu, mut, fn)
 
                     # Compute turbulent flux
                     tflux(ul, ur, um, gf, nfi, ydnsi, mu, mut, fn)
@@ -736,9 +772,9 @@ class RANSBCInters(BaseAdvecDiffBCInters):
                         # Save it at left solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux_ajac, lidx, nf, sf, rcp_dx, ydist)
+            return self.be.make_loop(self.nfpts, comm_flux_ajac, lidx, nf, sf, rf, rcp_dx, ydist)
         else:
-            def comm_flux(i_begin, i_end, lidx, nf, sf, ydist, muf, gradf, uf):
+            def comm_flux(i_begin, i_end, lidx, nf, sf, rf, ydist, muf, gradf, uf):
                 for idx in range(i_begin, i_end):
                     fn = array((nvars,), np.float64)
                     um = array((nvars,), np.float64)
@@ -771,7 +807,10 @@ class RANSBCInters(BaseAdvecDiffBCInters):
                     # Compute viscosity and viscous flux
                     muf[0, idx] = mu = compute_mu(um)
                     muf[1, idx] = mut = compute_mut(um, gf, mu, ydnsi)
-                    visflux(um, gf, nfi, mu, mut, fn)
+                    if is_axi:
+                        visflux(um, gf, nfi, mu, mut, rf[idx], fn)
+                    else:
+                        visflux(um, gf, nfi, mu, mut, fn)
 
                     # Compute turbulent flux
                     tflux(ul, ur, um, gf, nfi, ydnsi, mu, mut, fn)
@@ -780,7 +819,7 @@ class RANSBCInters(BaseAdvecDiffBCInters):
                         # Save it at left solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux, lidx, nf, sf, ydist)
+            return self.be.make_loop(self.nfpts, comm_flux, lidx, nf, sf, rf, ydist)
 
 
 class RANSSlipWallBCInters(RANSBCInters):

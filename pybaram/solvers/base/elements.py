@@ -23,6 +23,8 @@ class BaseElements:
         self.geom = get_geometry(name)
         self.nface = nface = self.geom.nface
 
+        self._configure_axisymmetric()
+
         # Order of spatial discretization
         self.order = order = cfg.getint('solver', 'order', 1)
 
@@ -31,6 +33,23 @@ class BaseElements:
 
         # Gradient method
         self._grad_method = cfg.get('solver', 'gradient', 'hybrid').lower()
+
+    def _configure_axisymmetric(self):
+        if not self.cfg.has_option('solver', 'axisymmetric-axis'):
+            self._is_axisymmetric = False
+            return
+
+        axis = self.cfg.get('solver', 'axisymmetric-axis').lower()
+
+        if self.ndims != 2:
+            raise ValueError("Axisymmetric mode is only supported for 2D meshes")
+
+        if axis not in 'xy'[:self.ndims]:
+            raise ValueError("Invalid solver.axisymmetric-axis coordinate")
+
+        self._is_axisymmetric = True
+        self._axisymmetric_axis_idx = 'xy'.index(axis)
+        self._axisymmetric_radius_idx = 1 - self._axisymmetric_axis_idx
 
     def coloring(self):
         try:
@@ -130,9 +149,19 @@ class BaseElements:
 
     @property
     @fc.lru_cache()
+    def _geom_vol(self):
+        return np.abs(self.geom.vol(self.eles))
+
+    @property
+    @fc.lru_cache()
     def _vol(self):
         # Volume of element
-        return np.abs(self.geom.vol(self.eles))
+        vol = self._geom_vol.copy()
+
+        if getattr(self, '_is_axisymmetric', False):
+            vol = vol*self._axisymmetric_cell_radius
+
+        return vol
     
     @property
     @fc.lru_cache()
@@ -153,7 +182,7 @@ class BaseElements:
         return 1/np.abs(self._vol)
 
     @fc.lru_cache()
-    def _gen_snorm_fpts(self):
+    def _gen_geom_snorm_fpts(self):
         # Check the direction of mesh (right hand side or left hand side)
         sign = np.sign(self.geom.vol(self.eles))[..., None]
 
@@ -164,6 +193,17 @@ class BaseElements:
         mag = np.einsum('...i,...i', snorm, snorm)
         mag = np.sqrt(mag)
         vec = snorm / mag[..., None]*sign
+
+        return mag, vec
+
+    @fc.lru_cache()
+    def _gen_snorm_fpts(self):
+        mag, vec = self._gen_geom_snorm_fpts()
+        mag = mag.copy()
+
+        if getattr(self, '_is_axisymmetric', False):
+            mag = mag*self._axisymmetric_face_radius
+
         return mag, vec
 
     @property
@@ -196,7 +236,8 @@ class BaseElements:
     @fc.lru_cache()
     def le(self):
         # Characteristic length of cell : vol / sum(S)
-        return 1/(self.rcp_vol * self._perimeter)
+        geom_perimeter = np.sum(self._gen_geom_snorm_fpts()[0], axis=0)
+        return self._geom_vol/geom_perimeter
 
     @property
     @fc.lru_cache()
@@ -219,9 +260,9 @@ class BaseElements:
         distance = np.linalg.norm(dxc, axis=0)
 
         # Normal vector and volume
-        snorm_mag = self._mag_snorm_fpts
-        snorm_vec = np.rollaxis(self._vec_snorm_fpts, 2)
-        vol = self._vol
+        snorm_mag = self._gen_geom_snorm_fpts()[0]
+        snorm_vec = np.rollaxis(self._gen_geom_snorm_fpts()[1], 2)
+        vol = self._geom_vol
 
         if self._grad_method == 'least-square':
             beta, w = 1.0, 1.0
@@ -286,3 +327,25 @@ class BaseElements:
     @fc.lru_cache()
     def fnorm_vol(self):
         return self.mag_fnorm * self.rcp_vol
+
+    @property
+    @fc.lru_cache()
+    def _axisymmetric_cell_radius(self):
+        ridx = self._axisymmetric_radius_idx
+        r = self.xc[:, ridx]
+
+        if np.any(r < -1e-14):
+            raise ValueError("Axisymmetric radius coordinate must be non-negative")
+
+        return np.maximum(r, 0.0)
+
+    @property
+    @fc.lru_cache()
+    def _axisymmetric_face_radius(self):
+        ridx = self._axisymmetric_radius_idx
+        r = self.xf[:, :, ridx]
+
+        if np.any(r < -1e-14):
+            raise ValueError("Axisymmetric radius coordinate must be non-negative")
+
+        return np.maximum(r, 0.0)
