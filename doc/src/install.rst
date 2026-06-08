@@ -14,7 +14,7 @@ Installation
 *************
 
 pyBaram |version| can be obtained from the `repository <https://gitlab.com/aadl_inha/PyBaram>`_.
-Currently, ``pyBaram`` supports Linux systems and Windows Subsystem for Linux (WSL).
+Currently, ``pyBaram`` supports Linux systems, Windows, and macOS, provided that the required third-party shared libraries are available for the target platform.
 
 Quick start
 ===========
@@ -64,10 +64,30 @@ To partition the mesh for parallel computation, `METIS` library is required.
 
 1. `METIS` >= 5.1
 
+On Windows, ``pyBaram`` requires a METIS dynamic library (``metis.dll`` or
+``libmetis.dll``); a static or import ``.lib`` file alone cannot be loaded by
+``ctypes``. If the conda package does not provide a METIS DLL, install a
+prebuilt METIS DLL or build METIS as a shared library.
+
 To convert a solution to `Tecplot <https://www.tecplot.com/>`_ binary format, `TecIO <https://www.tecplot.com/products/tecio-library/>`_ library is required.
 If not, `Tecplot <https://www.tecplot.com/>`_ output file is written in ASCII format.
 
 1. `TecIO` == 2014
+
+``pyBaram`` loads CGNS, METIS, and TecIO through ``ctypes``. The library search
+path can be extended with the ``PYBARAM_LIB_PATH`` environment variable. Use
+``:`` to separate paths on Linux and macOS, and ``;`` on Windows.
+
+For example, on Linux or macOS::
+
+    user@Computer ~/pyBaram$ export PYBARAM_LIB_PATH=/path/to/cgns/lib:/path/to/metis/lib
+
+On Windows::
+
+    C:\> set PYBARAM_LIB_PATH=C:\path\to\cgns\bin;C:\path\to\metis\bin
+
+When running inside a conda environment, ``pyBaram`` also searches common conda
+library directories such as ``Library\bin`` on Windows.
 
 For the colored LU-SGS scheme, the ``networkx`` package can be optionally used to perform graph coloring. If ``networkx`` is available, it is used in place of coloring based on ``scipy.sparse`` utilities.
 

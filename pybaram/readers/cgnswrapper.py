@@ -51,6 +51,10 @@ class CGNSWrapper(object):
         lib.cg_close.argtypes = [cgns_int]
         lib.cg_close.errcheck = self._errcheck
 
+        #cg_goto
+        lib.cg_goto.argtypes = [cgns_int, cgns_int]
+        lib.cg_goto.errcheck = self._errcheck
+
         # cg_base_read
         lib.cg_base_read.argtypes = [cgns_int, cgns_int, c_char_p, POINTER(cgns_int),
                                      POINTER(cgns_int)]
@@ -211,7 +215,10 @@ class CGNSWrapper(object):
         zone = zone['idx']
         n = self._cgns_int()
 
-        self.lib.cg_goto(file, base, b'Zone_t', 1, b'ZoneBC_t', 1, b'end')
+        self.lib.cg_goto(
+            file, base, c_char_p(b'Zone_t'), self._cgns_int(1), 
+            c_char_p(b'ZoneBC_t'), self._cgns_int(1), c_char_p(b'end')
+            )
         self.lib.cg_nbocos(file, base, zone, n)
         return n.value
 

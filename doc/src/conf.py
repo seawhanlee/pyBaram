@@ -90,7 +90,11 @@ latex_elements = {
 
 # Additional stuff for the LaTeX preamble.
 'preamble': r'\setcounter{secnumdepth}{4}',
+'makeindex': '',
+'printindex': '',
 }
+
+latex_domain_indices = False
 
 # Grouping the document tree into LaTeX files. List of tuples
 # (source start file, target name, title, author, documentclass [howto/manual]).
@@ -103,4 +107,3 @@ latex_documents = [
 
 bibtex_bibfiles = ['references.bib']
 bibtex_default_style = 'unsrt'
-
