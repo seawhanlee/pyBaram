@@ -286,7 +286,6 @@ class EulerBCInters(BaseAdvecBCInters):
         if impl_op == 'spectral-radius':
             # Collect array to save spectral raidus
             fspr = tuple(cell.fspr for cell in elemap.values())
-            #self.compute_spec_rad = Kernel(self._make_spec_rad(), fpts, fspr)
             self.compute_flux = Kernel(*self._make_flux(impl_op), fpts, fspr)
         elif impl_op == 'approx-jacobian':
             # Collect array to save Jacobian
