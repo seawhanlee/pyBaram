@@ -46,7 +46,7 @@ class VTKWriter(BaseWriter):
 
             # Header for cell
             off = self._write_arr_header(
-                fp, 'connectivity', '', off, voff[-1]*4, dtype='Int32')
+                fp, 'connectivity', '', off, int(voff[-1])*4, dtype='Int32')
             off = self._write_arr_header(
                 fp, 'offsets', '', off, voff.nbytes, dtype='Int32')
             off = self._write_arr_header(
