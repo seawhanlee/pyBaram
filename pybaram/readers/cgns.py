@@ -120,8 +120,9 @@ class CGNSReader(BaseReader):
         offset = 0
         pent = 0
         pents = {}
-        elenodes = {}
-        for idx in  range(cgns.nzones(base)):
+        node_chunks = []
+        elenode_chunks = defaultdict(list)
+        for idx in range(cgns.nzones(base)):
             # read zone
             zone = CGNSZoneReader(cgns, base, idx)
             
@@ -129,10 +130,10 @@ class CGNSReader(BaseReader):
 
             if idx == 0:
                 # Add 1st row to start node number as 1
-                nodepts = np.zeros(ndims)[:, None]
+                node_chunks.append(np.zeros(ndims)[:, None])
 
             # Stack nodes
-            nodepts = np.hstack([nodepts, zone.nodepts])
+            node_chunks.append(zone.nodepts)
 
             # Collect pents and local mapping in each zone
             pmap = {}
@@ -149,19 +150,14 @@ class CGNSReader(BaseReader):
                 new = k[0], pmap[k[1]]
 
                 # Add offset for global node numbering
-                v += offset
-
-                # Stack elenodes
-                if new in elenodes:
-                    elenodes[new] = np.vstack([elenodes[new], v])
-                else:
-                    elenodes[new] = v
+                elenode_chunks[new].append(v + offset)
 
             # Update offset of elenode for next zone
             offset += nn
 
         # Transpose nodepts
-        nodepts = nodepts.T
+        nodepts = np.hstack(node_chunks).T
+        elenodes = {k: np.vstack(v) for k, v in elenode_chunks.items()}
 
         # Physical entities can be divided up into:
         #  - fluid elements ('the mesh')

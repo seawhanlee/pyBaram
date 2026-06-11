@@ -1,21 +1,22 @@
 # -*- coding: utf-8 -*-
 from argparse import ArgumentParser, FileType
 
-from pybaram.api.io import import_mesh, partition_mesh, export_soln
-from pybaram.api.simulation import run, restart
-from pybaram.inifile import INIFile
-from pybaram.readers.native import NativeReader
-
 
 def process_import(args):
+    from pybaram.api.io import import_mesh
+
     import_mesh(args.inmesh, args.outmesh, args.scale)
 
 
 def process_part(args):
+    from pybaram.api.io import partition_mesh
+
     partition_mesh(args.mesh, args.out, args.npart, args.soln)
 
 
 def process_export(args):
+    from pybaram.api.io import export_soln
+
     export_soln(
         args.mesh, args.soln, args.out, 
         args.surface, args.list_surfaces
@@ -23,6 +24,10 @@ def process_export(args):
 
 
 def process_run(args):
+    from pybaram.api.simulation import run
+    from pybaram.inifile import INIFile
+    from pybaram.readers.native import NativeReader
+
     mesh = NativeReader(args.mesh)
     cfg = INIFile(args.ini)
 
@@ -30,6 +35,10 @@ def process_run(args):
 
 
 def process_restart(args):
+    from pybaram.api.simulation import restart
+    from pybaram.inifile import INIFile
+    from pybaram.readers.native import NativeReader
+
     mesh = NativeReader(args.mesh)
     soln = NativeReader(args.soln)
     

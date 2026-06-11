@@ -36,6 +36,8 @@ class BaseReader(object, metaclass=ABCMeta):
 
 
 class ConsAssembler(object):
+    _con_dtype = np.dtype('S4,i4,i1,i1')
+
     # Face numberings for each element type
     _petype_fnums = {
         'tri': {'line': [0, 1, 2]},
@@ -65,9 +67,15 @@ class ConsAssembler(object):
         for petype, eles in fpart.items():
             for pftype, fnmap in self._petype_fnmap[petype].items():
                 fnums = self._petype_fnums[petype][pftype]
-                con = [(petype, i, j, 0)
-                       for i in range(len(eles)) for j in fnums]
-                nodes = np.sort(eles[:, fnmap]).reshape(len(con), -1)
+                neles, nf = len(eles), len(fnums)
+
+                con = np.empty(neles*nf, dtype=self._con_dtype)
+                con['f0'] = petype.encode()
+                con['f1'] = np.repeat(np.arange(neles), nf)
+                con['f2'] = np.tile(fnums, neles)
+                con['f3'] = 0
+
+                nodes = np.sort(eles[:, fnmap], axis=2).reshape(neles*nf, -1)
                 faces[pftype].append((con, nodes))
 
         return faces
@@ -77,13 +85,32 @@ class ConsAssembler(object):
         resid = {}
 
         for pftype, face in faces.items():
-            for f, n in chain.from_iterable(zip(f, n) for f, n in face):
-                sn = tuple(n)
+            cons, nodes = zip(*face)
+            cons = np.concatenate(cons)
+            nodes = np.concatenate(nodes)
 
-                if sn in resid:
-                    pairs[pftype].append([resid.pop(sn), f])
-                else:
-                    resid[sn] = f
+            if len(nodes) == 0:
+                continue
+
+            # Sort faces by their node ids so matching faces are adjacent.
+            order = np.lexsort(nodes.T[::-1])
+            cons = cons[order]
+            nodes = nodes[order]
+
+            same = np.all(nodes[1:] == nodes[:-1], axis=1)
+            cuts = np.flatnonzero(~same) + 1
+            starts = np.r_[0, cuts]
+            ends = np.r_[cuts, len(nodes)]
+            counts = ends - starts
+
+            paired = counts == 2
+            if np.any(paired):
+                pair_idx = np.column_stack([starts[paired], starts[paired] + 1]).ravel()
+                pairs[pftype].extend(cons[pair_idx].reshape(-1, 2).tolist())
+
+            resid_idx = starts[~paired]
+            for f, n in zip(cons[resid_idx], nodes[resid_idx]):
+                resid[tuple(n)] = f
 
         return pairs, resid
 
@@ -176,7 +203,7 @@ class ConsAssembler(object):
         return ret
 
     def _extract_vtx_con(self, elenodes, felespent):
-        vcon = defaultdict(set)
+        vcon = defaultdict(list)
         for etype, pent in elenodes:
             if pent != felespent:
                 continue
@@ -185,10 +212,25 @@ class ConsAssembler(object):
             petype, nnode = self._etype_map[etype]
 
             eles = elenodes[etype, pent]
+            neles = len(eles)
 
-            for i, ele in enumerate(eles):
-                for j, n in enumerate(ele):
-                    vcon[n].update({(petype, i, j, 0)})
+            vtx = np.empty(neles*nnode, dtype=self._con_dtype)
+            vtx['f0'] = petype.encode()
+            vtx['f1'] = np.repeat(np.arange(neles), nnode)
+            vtx['f2'] = np.tile(np.arange(nnode), neles)
+            vtx['f3'] = 0
+
+            nodes = eles.reshape(-1)
+            order = np.argsort(nodes, kind='mergesort')
+            nodes = nodes[order]
+            vtx = vtx[order]
+
+            cuts = np.flatnonzero(nodes[1:] != nodes[:-1]) + 1
+            starts = np.r_[0, cuts]
+            ends = np.r_[cuts, len(nodes)]
+
+            for i, j in zip(starts, ends):
+                vcon[nodes[i]].extend(vtx[i:j])
 
         return vcon
 
@@ -214,8 +256,8 @@ class ConsAssembler(object):
             for li, ri in zip(lnodes[lidx], rnodes[ridx]):
                 if li != ri:
                     # Prevent duplicated vcon for periodic faces
-                    vcon[li].update(vcon[li], vcon[ri])
-                    vcon[ri] = {}
+                    vcon[li].extend(vcon[ri])
+                    vcon[ri] = []
                 pass
 
     def get_vtx_connectivity(self):
@@ -227,11 +269,12 @@ class ConsAssembler(object):
         self._extract_pair_vtx_con(self._elenodes, pfacespents, vcon)
 
         # Flatten vtx
-        vtx = chain.from_iterable([vcon[k] for k in sorted(vcon)])
-        vtx = np.array(list(vtx), dtype='S4,i4,i1,i1')
+        keys = [k for k in sorted(vcon) if len(vcon[k]) > 0]
+        vtx = chain.from_iterable([vcon[k] for k in keys])
+        vtx = np.array(list(vtx), dtype=self._con_dtype)
 
         # Get address in terms of vertex connectivity
-        ivtx = np.cumsum([0] + [len(vcon[k]) for k in sorted(vcon) if len(vcon[k]) > 0])
+        ivtx = np.cumsum([0] + [len(vcon[k]) for k in keys])
 
         # Output
         ret = {'vtx_p0': vtx, 'ivtx_p0': ivtx}
