@@ -338,3 +338,8 @@ class BlockLUSGS(SteadyRelaxationIntegrator):
 class ColoredBlockLUSGS(SteadyRelaxationIntegrator):
     name = 'colored-blu-sgs'
     impl_op = 'approx-jacobian'
+
+
+class PETSc(SteadyRelaxationIntegrator):
+    name = 'petsc'
+    impl_op = 'approx-jacobian'

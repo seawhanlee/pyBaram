@@ -56,6 +56,11 @@ pyBaram |version| requires Python 3.9+ and following python packages.
 
 The ``scipy`` package is a required dependency and is used for numerical utilities and sparse matrix operations. Mesh reordering using the reverse Cuthill-McKee algorithm is applied by default.
 
+For PETSc-based implicit relaxation, the ``petsc4py`` package is required.
+It is optional for the standard LU-SGS and block LU-SGS relaxation methods.
+
+1. `petsc4py`
+
 In order to convert the mesh with CGNS format, CGNS library is required.
 
 1. `CGNS` >= 3.4
