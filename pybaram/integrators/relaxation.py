@@ -2,6 +2,8 @@
 from pybaram.backends.types import ArrayBank, Kernel, MetaKernel
 from pybaram.utils.misc import subclass_by_name
 
+import numpy as np
+
 
 def get_relaxation(cfg, intg, sect, name=None, default='lu-sgs'):
     if name is None:
@@ -424,3 +426,377 @@ class ColoredBlockLUSGSRelaxation(BaseBlockLUSGSRelaxation):
             self._make_update_kernels(
                 ele, make_blusgs_update, make_sub_residual
             )
+
+
+class PETScRelaxation(BaseRelaxation):
+    """Per-element PETSc KSP relaxation.
+
+    Each element group builds a partition-local BSR system from the existing
+    face Jacobian storage, solves it with PETSc KSP, and scatters the solution
+    back to the SOA correction buffer ele.du.
+    """
+
+    name = 'petsc'
+    impl_op = 'approx-jacobian'
+
+    def build(self, a0):
+        from pybaram.integrators.blusgs import make_blusgs_update
+        from pybaram.integrators.petsc import (
+            PETScElementSolve, make_bsr_patterns, make_petsc_systems
+        )
+
+        intg = self._intg
+
+        # Keep PETSc helpers as attributes so the main build path stays local.
+        self._petsc_element_solve_cls = PETScElementSolve
+        self._make_bsr_patterns = make_bsr_patterns
+        self._make_petsc_systems = make_petsc_systems
+
+        # Time term and PETSc KSP controls.
+        petsc_sect = 'solver-petsc'
+        self.a0 = a0
+        self.ksp_type = self._cfg.get(petsc_sect, 'ksp', 'gmres')
+        self.rtol = self._cfg.getfloat(petsc_sect, 'sub-rtol', 1e-3)
+        self.atol = self._cfg.getfloat(petsc_sect, 'sub-atol', 1e-15)
+        self.max_it = self._cfg.getint(petsc_sect, 'sub-iter', 30)
+        self.precon = self._cfg.get(petsc_sect, 'preconditioner', 'ilu')
+        self.pc_factor_levels = self._cfg.getint(
+            petsc_sect, 'pc-factor-levels', 0
+        )
+
+        for ele in intg.sys.eles:
+            # PETSc writes the linear solve result into ele.du.
+            ele.du = ArrayBank(ele.fpts, 1)
+            self._make_update_kernel(ele, make_blusgs_update)
+
+        # Build per-element-group BSR layouts before creating PETSc objects.
+        self._make_layout()
+
+        # Scatter PETSc solution vectors back into SOA element storage.
+        self._scatter_flow_solution = self._make_solution_scatter_kernels(
+            0, self._nvars
+        )
+        if intg._is_turb:
+            self._scatter_turb_solution = self._make_solution_scatter_kernels(
+                self._nvars, self._tnvars
+            )
+
+        # Backend kernels fill BSR values and RHS vectors for each solve.
+        self._assemble_flow = self._make_flow_assembly_kernels()
+        if intg._is_turb:
+            self._assemble_turb = self._make_turb_assembly_kernels()
+
+        # Allocate reusable PETSc matrices, vectors, and KSP wrappers.
+        self._make_petsc_objects()
+
+        # Expose solve callables through the element MetaKernel interface.
+        self._bind_element_solvers()
+
+    def _make_update_kernel(self, ele, make_blusgs_update):
+        intg = self._intg
+        be = intg.be
+        idx_u = intg._curr_idx
+
+        update = make_blusgs_update(ele)
+        ele.update = Kernel(
+            *be.make_loop(ele.neles, update), ele.upts[idx_u], ele.du
+        )
+
+    def _make_layout(self):
+        intg = self._intg
+
+        ele0 = next(iter(intg.sys.eles))
+        self._nvars = nvars = ele0.nfvars
+        if intg._is_turb:
+            self._tnvars = tnv = ele0.nturbvars
+
+        for ele in intg.sys.eles:
+            if ele.nfvars != nvars:
+                raise ValueError(
+                    "petsc requires a consistent number of flow "
+                    "variables across element types"
+                )
+
+            if intg._is_turb and ele.nturbvars != tnv:
+                raise ValueError(
+                    "petsc requires a consistent number of "
+                    "turbulent variables across element types"
+                )
+
+        # Flow equations use one BSR system per element group.
+        self._flow_patterns = self._make_bsr_patterns(intg.sys.eles, nvars)
+
+        # Turbulence equations are solved separately with their own block size.
+        if intg._is_turb:
+            self._turb_patterns = self._make_bsr_patterns(
+                intg.sys.eles, tnv
+            )
+
+    def _make_petsc_objects(self):
+        try:
+            from petsc4py import PETSc
+        except ImportError as exc:
+            raise RuntimeError(
+                "petsc requires petsc4py to be installed"
+            ) from exc
+
+        self._petsc_insert_mode = PETSc.InsertMode.INSERT_VALUES
+
+        # Use COMM_SELF so each MPI rank solves only its local element systems.
+        self._flow_systems = self._make_petsc_systems(
+            self._flow_patterns, PETSc
+        )
+
+        # Turbulence equations get separate PETSc systems from flow equations.
+        if self._intg._is_turb:
+            self._turb_systems = self._make_petsc_systems(
+                self._turb_patterns, PETSc
+            )
+
+    def _bind_element_solvers(self):
+        for ele in self._intg.sys.eles:
+            # Bind the flow linear solve to this element group.
+            ele.petsc_flow_solve = self._petsc_element_solve_cls(
+                self._flow_systems[ele],
+                self._assemble_flow[ele],
+                self._scatter_flow_solution[ele],
+                self._make_ksp,
+                self._petsc_insert_mode
+            )
+
+            if self._intg._is_turb:
+                # Bind the turbulence linear solve when turbulence is enabled.
+                ele.petsc_turb_solve = self._petsc_element_solve_cls(
+                    self._turb_systems[ele],
+                    self._assemble_turb[ele],
+                    self._scatter_turb_solution[ele],
+                    self._make_ksp,
+                    self._petsc_insert_mode
+                )
+
+    def _make_solution_scatter_kernels(self, var0, nvars):
+        intg = self._intg
+        be = intg.be
+        kernels = {}
+
+        # PETSc vectors are cell-major; ele.du is SOA by variable.
+        for ele in intg.sys.eles:
+            def copy_solution(i_begin, i_end, du, sol):
+                for idx in range(i_begin, i_end):
+                    base = idx*nvars
+
+                    for kdx in range(nvars):
+                        du[var0 + kdx, idx] = sol[base + kdx]
+
+            kernels[ele] = Kernel(
+                *be.make_loop(ele.neles, copy_solution), ele.du
+            )
+
+        return kernels
+
+    def _make_flow_assembly_kernels(self):
+        intg = self._intg
+        be = intg.be
+        idx_rhs = intg._rhs_idx
+        nvars = self._nvars
+        a0 = self.a0
+        kernels = {}
+
+        for ele in intg.sys.eles:
+            nface = ele.nface
+            pattern = self._flow_patterns[ele]
+            diag_slots = pattern.diag_slots
+            off_slots = pattern.off_slots
+            bs2 = nvars*nvars
+
+            def make_assemble_bsr(nface):
+                # Bind nface per element group. Without this factory, mixed
+                # meshes can accidentally use the last group's face count.
+                def assemble_bsr(i_begin, i_end, rhs, dt, jmat, fnorm_vol,
+                                 nei_ele, diag_slots, off_slots, av, bv):
+                    for idx in range(i_begin, i_end):
+                        base = idx*nvars
+
+                        for kdx in range(nvars):
+                            bv[base + kdx] = rhs[kdx, idx]
+
+                        for row in range(nvars):
+                            for col in range(nvars):
+                                val = 0.0
+                                entry = row*nvars + col
+
+                                for jdx in range(nface):
+                                    val += (
+                                        jmat[0, row, col, jdx, idx]
+                                        * fnorm_vol[jdx, idx]
+                                    )
+
+                                if row == col:
+                                    val += 1/dt[idx] + a0
+
+                                av[diag_slots[idx]*bs2 + entry] += val
+
+                        for jdx in range(nface):
+                            neib = nei_ele[jdx, idx]
+
+                            if neib == idx:
+                                continue
+
+                            fv = fnorm_vol[jdx, idx]
+
+                            for row in range(nvars):
+                                for col in range(nvars):
+                                    entry = row*nvars + col
+                                    av[off_slots[jdx, idx]*bs2 + entry] += (
+                                        jmat[1, row, col, jdx, idx]*fv
+                                    )
+
+                return assemble_bsr
+
+            kernels[ele] = Kernel(
+                *be.make_loop(ele.neles, make_assemble_bsr(nface)),
+                ele.upts[idx_rhs], ele.dt, ele.jmat, ele.fnorm_vol,
+                ele.nei_ele, diag_slots, off_slots
+            )
+
+        return kernels
+
+    def _make_turb_assembly_kernels(self):
+        intg = self._intg
+        be = intg.be
+        idx_rhs = intg._rhs_idx
+        idx_u = intg._curr_idx
+        nvars = self._tnvars
+        a0 = self.a0
+        tcfl_fac = intg._tcfl_fac
+        kernels = {}
+
+        for ele in intg.sys.eles:
+            nface = ele.nface
+            nfvars = ele.nfvars
+            pattern = self._turb_patterns[ele]
+            diag_slots = pattern.diag_slots
+            off_slots = pattern.off_slots
+            srcjacobian = ele.make_source_jacobian()
+            array = be.local()
+            bs2 = nvars*nvars
+
+            def make_assemble_tbsr(nface, nfvars, srcjacobian):
+                # Bind element-specific values for mixed meshes. In particular
+                # nfvars and source Jacobian can differ from the last group.
+                def assemble_tbsr(i_begin, i_end, rhs, upts, dt, tjmat,
+                                  fnorm_vol, nei_ele, dsrc, diag_slots,
+                                  off_slots, av, bv):
+                    for idx in range(i_begin, i_end):
+                        base = idx*nvars
+
+                        for kdx in range(nvars):
+                            bv[base + kdx] = rhs[nfvars + kdx, idx]
+
+                        tmat = array((nvars, nvars), np.float64)
+
+                        for row in range(nvars):
+                            for col in range(nvars):
+                                val = 0.0
+
+                                for jdx in range(nface):
+                                    val += (
+                                        tjmat[0, row, col, jdx, idx]
+                                        * fnorm_vol[jdx, idx]
+                                    )
+
+                                tmat[row, col] = val
+
+                        srcjacobian(upts[:, idx], tmat, dsrc[:, idx])
+
+                        for row in range(nvars):
+                            for col in range(nvars):
+                                val = tmat[row, col]
+                                entry = row*nvars + col
+
+                                if row == col:
+                                    val += 1/(dt[idx]*tcfl_fac) + a0
+
+                                av[diag_slots[idx]*bs2 + entry] += val
+
+                        for jdx in range(nface):
+                            neib = nei_ele[jdx, idx]
+
+                            if neib == idx:
+                                continue
+
+                            fv = fnorm_vol[jdx, idx]
+
+                            for row in range(nvars):
+                                for col in range(nvars):
+                                    entry = row*nvars + col
+                                    av[off_slots[jdx, idx]*bs2 + entry] += (
+                                        tjmat[1, row, col, jdx, idx]*fv
+                                    )
+
+                return assemble_tbsr
+
+            kernels[ele] = Kernel(
+                *be.make_loop(
+                    ele.neles,
+                    make_assemble_tbsr(nface, nfvars, srcjacobian)
+                ),
+                ele.upts[idx_rhs], ele.upts[idx_u], ele.dt, ele.tjmat,
+                ele.fnorm_vol, ele.nei_ele, ele.dsrc, diag_slots,
+                off_slots
+            )
+
+        return kernels
+
+    def _make_ksp(self, A):
+        from petsc4py import PETSc
+
+        # Create a rank-local Krylov solver for one element group's matrix.
+        ksp = PETSc.KSP().create(PETSc.COMM_SELF)
+        ksp.setOperators(A)
+        ksp.setType(self.ksp_type)
+        ksp.setTolerances(
+            rtol=self.rtol, atol=self.atol, max_it=self.max_it
+        )
+
+        # The preconditioner type is configurable; ILU is the default.
+        pc = ksp.getPC()
+        pc.setType(self.precon)
+        pc.setFactorLevels(self.pc_factor_levels)
+
+        # Let command-line PETSc options override the defaults above.
+        ksp.setFromOptions()
+
+        return ksp
+
+    def _reduce_solver_stats(self, stats):
+        nit = max(s[0] for s in stats)
+        subres = max(s[1] for s in stats)
+
+        return nit, subres
+
+    def step(self, **kwargs):
+        intg = self._intg
+
+        resid = intg.rhs_resid(0, 1, **kwargs)
+
+        intg.sys.eles.du.set(0)
+
+        nit, subres = self._reduce_solver_stats(
+            intg.sys.eles.petsc_flow_solve()
+        )
+
+        if intg._is_turb:
+            tnit, tsubres = self._reduce_solver_stats(
+                intg.sys.eles.petsc_turb_solve()
+            )
+            nit = max(nit, tnit)
+            subres = max(subres, tsubres)
+
+        intg.sys.eles.update()
+        intg.sys.post(0)
+
+        intg.subitnum = nit
+        intg.subres = subres
+
+        return 0, resid

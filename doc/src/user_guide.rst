@@ -316,7 +316,7 @@ Time integration, relaxation, and dual-time stepping parameters are configured.
 
    For ``steady`` simulation, following options can be selected.
 
-    ``eulerexplicit`` | ``tvd-rk3`` | ``rk5`` | ``lu-sgs`` | ``colored-lu-sgs`` | ``blu-sgs`` | ``colored-blu-sgs``
+    ``eulerexplicit`` | ``tvd-rk3`` | ``rk5`` | ``lu-sgs`` | ``colored-lu-sgs`` | ``blu-sgs`` | ``colored-blu-sgs`` | ``petsc``
 
    For ``unsteady-dts`` simulation, following options can be selected.
 
@@ -326,7 +326,11 @@ Time integration, relaxation, and dual-time stepping parameters are configured.
    until enough physical-time history is available: ``bdf2`` starts with BDF1,
    and ``bdf3`` starts with BDF1 and then BDF2.
 
-    * ``lu-sgs``, ``blu-sgs`` --- These schemes work only if disabling multi-threading layer (``single``).
+    * ``lu-sgs``, ``blu-sgs``, ``petsc`` --- These schemes work only if
+      disabling multi-threading layer (``single``).
+
+    * ``petsc`` --- PETSc KSP-based implicit relaxation. This method requires
+      ``petsc4py``.
 
 6. time --- initial and the last physical time for ``unsteady`` and ``unsteady-dts`` simulations.
 
@@ -382,7 +386,7 @@ Time integration, relaxation, and dual-time stepping parameters are configured.
 
     * ``none`` --- No viscous flux Jacobian imported. This type can cause convergence delay.
 
-    * Applicable methods --- ``jacobi``, ``blu-sgs``, ``colored-blu-sgs``
+    * Applicable methods --- ``jacobi``, ``blu-sgs``, ``colored-blu-sgs``, ``petsc``
 
 Example for unsteady simulation::
 
@@ -417,6 +421,24 @@ Example for steady simulation::
     tolerance = 1e-12
     res-var = rhou
 
+Example for steady simulation with PETSc KSP relaxation::
+
+    [solver-time-integrator]
+    mode = steady
+    cfl = 5.0
+    stepper = petsc
+    max-iter = 10000
+    tolerance = 1e-12
+    res-var = rho
+
+    [solver-petsc]
+    ksp = gmres
+    preconditioner = ilu
+    pc-factor-levels = 0
+    sub-iter = 30
+    sub-rtol = 1e-3
+    sub-atol = 1e-15
+
 
 [solver-time-relaxation]
 ************************
@@ -424,7 +446,7 @@ Pseudo-time relaxation method for ``unsteady-dts`` simulations is configured.
 
 1. method --- relaxation method for pseudo-time sub-iterations.
 
-    ``lu-sgs`` | ``colored-lu-sgs`` | ``blu-sgs`` | ``colored-blu-sgs``
+    ``lu-sgs`` | ``colored-lu-sgs`` | ``blu-sgs`` | ``colored-blu-sgs`` | ``petsc``
 
 2. sub-iter --- the maximum iteration number for block LU-SGS sub-iteration process.
 
@@ -433,6 +455,71 @@ Pseudo-time relaxation method for ``unsteady-dts`` simulations is configured.
 3. sub-tol --- the stopping criteria for block LU-SGS sub-iteration.
 
     `float`
+
+[solver-petsc]
+**************
+PETSc KSP options are configured when ``petsc`` is selected as a steady
+``stepper`` or as a dual-time stepping relaxation ``method``.
+
+1. ksp --- PETSc Krylov solver type.
+
+    `string`
+
+   The default value is ``gmres``. PETSc's BiCGStab type can be selected with
+   ``bcgs``.
+
+2. preconditioner --- PETSc preconditioner type.
+
+    `string`
+
+   The default value is ``ilu``.
+
+3. pc-factor-levels --- PETSc factor fill level for ILU-like
+   preconditioners.
+
+    `int`
+
+   The default value is ``0``.
+
+4. sub-iter --- the maximum number of PETSc KSP iterations.
+
+    `int`
+
+   The default value is ``30``.
+
+5. sub-rtol --- relative tolerance for the PETSc KSP solve.
+
+    `float`
+
+   The default value is ``1e-3``.
+
+6. sub-atol --- absolute tolerance for the PETSc KSP solve.
+
+    `float`
+
+   The default value is ``1e-15``.
+
+Example for dual-time stepping with PETSc KSP relaxation::
+
+    [solver-time-integrator]
+    mode = unsteady-dts
+    stepper = bdf2
+    time = 0, 0.25
+    dt = 1e-3
+    sub-cfl = 5.0
+    sub-iter = 50
+    sub-tol = 1e-3
+
+    [solver-time-relaxation]
+    method = petsc
+
+    [solver-petsc]
+    ksp = bcgs
+    preconditioner = ilu
+    pc-factor-levels = 0
+    sub-iter = 30
+    sub-rtol = 1e-3
+    sub-atol = 1e-15
 
 
 [solver-cfl-ramp]
