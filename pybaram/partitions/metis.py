@@ -344,6 +344,9 @@ class METISPartition:
         return mapper
 
     def _metis_part(self, npart, etypes, nele, con):
+        if npart == 1:
+            return np.zeros(sum(nele[t] for t in etypes), dtype=int)
+
         # Weights
         vwgt = []
         for t in etypes:
