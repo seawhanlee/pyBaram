@@ -1,11 +1,4 @@
 # -*- coding: utf-8 -*-
-from pybaram.readers import get_reader
-from pybaram.partitions import get_partition
-from pybaram.readers.native import NativeReader
-from pybaram.writers import get_writer
-
-
-import h5py
 import os
 
 
@@ -17,6 +10,9 @@ def import_mesh(inmesh, outmesh, scale=1.0):
     :param string outmesh: Converted pyBaram mesh (.pbrm)
     :param float scale: Geometric scale factor 
     """
+    import h5py
+    from pybaram.readers import get_reader
+
     # Split ext
     extn = os.path.splitext(inmesh)[1]
 
@@ -41,6 +37,8 @@ def partition_mesh(inmesh, outmesh, npart, solns=[]):
     :param int npart: number of partition
     :param string solution: path and name of patitioned mesh
     """
+    from pybaram.partitions import get_partition
+    from pybaram.readers.native import NativeReader
 
     # mesh
     msh = NativeReader(inmesh)
@@ -63,6 +61,9 @@ def export_soln(meshf, solnf, out, bcs, is_list=False):
     :param string bcs: surface to extracted
     :param string is_list: list boundary surfaces
     """
+    from pybaram.readers.native import NativeReader
+    from pybaram.writers import get_writer
+
     mesh = NativeReader(meshf)
 
     if is_list:

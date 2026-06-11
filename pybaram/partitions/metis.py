@@ -11,15 +11,15 @@ from pybaram.partitions.metiswrapper import METISWrapper
 
 
 class METISPartition:
-    _wmap = {'quad': 3, 'tri': 2, 'tet': 4, 'pri': 5, 'pyr': 5, 'hex': 6}
+    _wmap = {'tri': 3, 'quad': 4, 'tet': 4, 'pri': 5, 'pyr': 5, 'hex': 6}
 
     def __init__(self, msh, out, npart, sols):
         self.npart = npart
 
         # Set destination path and file name
         if out.endswith(".pbrm"):
-            path = '.'
-            mshname = out
+            path = os.path.dirname(out) or '.'
+            mshname = os.path.basename(out)
         else:
             path=out
             mshname = msh.name
@@ -84,7 +84,7 @@ class METISPartition:
         for k in msh:
             m = re.match(r"con_p(\d+)", k)
             if m:
-                msh_part = max(msh_part, eval(m.group(1)))
+                msh_part = max(msh_part, int(m.group(1)))
         msh_part += 1
 
         return msh_part
@@ -266,13 +266,8 @@ class METISPartition:
         # number of elements
         nele = {t: msh['elm_{}_p0'.format(t)].shape[0] for t in etypes}
 
-        # List of element connectivity
-        elms = []
-        for t in etypes:
-            elms += msh['elm_{}_p0'.format(t)].tolist()
-
         # Do metis Partition
-        epart = self._metis_part(npart, etypes, nele, elms)
+        epart = self._metis_part(npart, etypes, nele, msh['con_p0'])
         epart = epart.astype(int)
 
         # Mapper etype : (epart, lidx)
@@ -348,27 +343,73 @@ class METISPartition:
 
         return mapper
 
-    def _metis_part(self, npart, etypes, nele, elms):
-        # Linked list of elms
-        eind = np.concatenate(elms) - 1
-        eptr = np.cumsum([0] + [len(e) for e in elms])
-
+    def _metis_part(self, npart, etypes, nele, con):
         # Weights
         vwgt = []
         for t in etypes:
             vwgt += [self._wmap[t]]*nele[t]
         vwgt = np.array(vwgt)
 
-        ncommon = 2
-
         # Partitioning with METIS
         ne = sum([nele[t] for t in etypes])
-        nn = eind.max() + 1
+        xadj, adjncy = self._global_ele_graph(etypes, nele, con)
 
         metis = METISWrapper()
-        epart, _ = metis.part_mesh(npart, nn, ne, eptr, eind, ncommon, vwgt)
+        epart = metis.part_graph(npart, ne, xadj, adjncy, vwts=vwgt)
 
         return epart
+
+    def _global_ele_graph(self, etypes, nele, con):
+        # Offsets for flattening type-local element indices into global ids.
+        offsets = {}
+        offset = 0
+        for t in etypes:
+            offsets[t] = offset
+            offset += nele[t]
+
+        ne = offset
+        lhs, rhs = con
+
+        lgidx = np.empty(len(lhs), dtype=np.int64)
+        rgidx = np.empty(len(rhs), dtype=np.int64)
+
+        # Convert each side of con_p0 to global element ids.
+        for t in etypes:
+            etype = t.encode()
+
+            lmask = lhs['f0'] == etype
+            rmask = rhs['f0'] == etype
+
+            lgidx[lmask] = offsets[t] + lhs['f1'][lmask]
+            rgidx[rmask] = offsets[t] + rhs['f1'][rmask]
+
+        # Build undirected edges.  Encode (src, dst) as src*ne + dst so the
+        # duplicate removal uses a faster 1D unique instead of axis=0.
+        src = np.concatenate([lgidx, rgidx])
+        dst = np.concatenate([rgidx, lgidx])
+
+        mask = src != dst
+        src = src[mask]
+        dst = dst[mask]
+
+        if len(src):
+            keys = np.unique(src*ne + dst)
+            src = keys // ne
+            dst = keys % ne
+
+            # CSR: neighbors of element i are adjncy[xadj[i]:xadj[i + 1]].
+            counts = np.bincount(src, minlength=ne)
+            xadj = np.empty(ne + 1, dtype=np.int64)
+            xadj[0] = 0
+            np.cumsum(counts, out=xadj[1:])
+
+            adjncy = dst.astype(np.int64)
+        else:
+            # No internal element adjacency.
+            xadj = np.zeros(ne + 1, dtype=np.int64)
+            adjncy = np.array([], dtype=np.int64)
+
+        return xadj, adjncy
 
     def _localized_con(self, lhs, mapper):
         cpart = np.empty(len(lhs), dtype=int)
@@ -502,27 +543,30 @@ class METISPartition:
             # Local CSR pointer over compacted vertex list
             newm['ivtx_p{}'.format(p)] = np.cumsum(cnt[gvtx])
 
-        # Collect local vertex address to communicate
-        n_ivtx_p = np.zeros(vpart.max() + 1, dtype=int)
-        for i1, i2 in zip(ivtx[:-1], ivtx[1:]):
-            # Local ranks
-            lpart = vpart[i1:i2]
-            lranks = set(lpart)
+        # Unique (global vertex, partition) pairs define each local vertex.
+        vpairs = np.unique(vtx_id.astype(np.int64)*self.npart + vpart)
+        gvtx = vpairs // self.npart
+        vparts = vpairs % self.npart
 
-            for p in lranks:
-                # Local index for the current vertex
+        # Assign local vertex ids in the same global-vertex order as ivtx_p.
+        local = np.empty_like(vparts)
+        n_ivtx_p = np.zeros(self.npart, dtype=int)
+
+        cuts = np.flatnonzero(np.diff(gvtx)) + 1
+        starts = np.r_[0, cuts]
+        ends = np.r_[cuts, gvtx.size]
+
+        for s, e in zip(starts, ends):
+            for i in range(s, e):
+                p = vparts[i]
+                local[i] = n_ivtx_p[p]
                 n_ivtx_p[p] += 1
 
-            if len(lranks) > 1:
-                # Combiation of p2p communications at the currcent vertex
-                for p1, p2 in combinations(lranks, 2):
-                    # Zero-numbering
-                    nvtx1 = n_ivtx_p[p1] - 1
-                    nvtx2 = n_ivtx_p[p2] - 1
-
-                    # Save p2p communication lists
-                    newm['nvtx_p{}p{}'.format(p1, p2)].append(nvtx1)
-                    newm['nvtx_p{}p{}'.format(p2, p1)].append(nvtx2)
+            if e - s > 1:
+                for i, j in combinations(range(s, e), 2):
+                    p1, p2 = vparts[i], vparts[j]
+                    newm['nvtx_p{}p{}'.format(p1, p2)].append(local[i])
+                    newm['nvtx_p{}p{}'.format(p2, p1)].append(local[j])
 
         # Make numpy array
         for k, v in newm.items():
