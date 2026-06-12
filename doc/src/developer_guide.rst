@@ -276,6 +276,7 @@ For RANS simulation, class hierarchy can be depicted as follows:
 
 .. inheritance-diagram:: pybaram.solvers.ranskwsst.elements
                          pybaram.solvers.ranssa.elements
+                         pybaram.solvers.ranssaneg.elements
     :top-classes: pybaram.solver.base.elements.BaseElements
     :parts: 1
 
@@ -283,9 +284,13 @@ For RANS simulation, class hierarchy can be depicted as follows:
 
 * ``RANSSAElements`` : specific kernels for Spalart-Allmaras turbulence model
 
+* ``RANSSANegElements`` : specific kernels for negative Spalart-Allmaras turbulence model
+
 * ``RANSKWSSTElements`` : specific kernels for SST turbulence model
 
 * ``RANSSAFluidElements`` : physics of Spalart-Allmaras turbulence model
+
+* ``RANSSANegFluidElements`` : physics of negative Spalart-Allmaras turbulence model
 
 * ``RANSKWSSTFluidElements`` : physics of SST turbulence model
 
@@ -314,6 +319,7 @@ The class hierarchy of internal interfaces can be depicted as follows:
 
 .. inheritance-diagram:: pybaram.solvers.ranskwsst.inters.RANSKWSSTIntInters
                          pybaram.solvers.ranssa.inters.RANSSAIntInters
+                         pybaram.solvers.ranssaneg.inters.RANSSANegIntInters
                          pybaram.solvers.navierstokes.inters.NavierStokesIntInters
                          pybaram.solvers.euler.inters.EulerIntInters
     :top-classes: pybaram.solver.base.elements.BaseIntInters
@@ -331,12 +337,15 @@ The class hierarchy of internal interfaces can be depicted as follows:
 
 * ``RANSSAInters`` : kernel to compute turbulent flux for Spalart-Allmaras turbulence model
 
+* ``RANSSANegInters`` : kernel to compute turbulent flux for negative Spalart-Allmaras turbulence model
+
 * ``RANSKWSSTInters`` : kernel to compute turbulent flux for SST turbulence model
 
 The class hierarchy of physical boundary interfaces can be depicted as follows:
 
 .. inheritance-diagram:: pybaram.solvers.ranskwsst.inters.RANSKWSSTBCInters
                          pybaram.solvers.ranssa.inters.RANSSABCInters
+                         pybaram.solvers.ranssaneg.inters.RANSSANegBCInters
                          pybaram.solvers.navierstokes.inters.NavierStokesBCInters
                          pybaram.solvers.euler.inters.EulerBCInters
     :top-classes: pybaram.solver.base.elements.BaseBCInters
@@ -356,6 +365,7 @@ The class hierarchy of MPI interfaces can be depicted as follows:
 
 .. inheritance-diagram:: pybaram.solvers.ranskwsst.inters.RANSKWSSTMPIInters
                          pybaram.solvers.ranssa.inters.RANSSAMPIInters
+                         pybaram.solvers.ranssaneg.inters.RANSSANegMPIInters
                          pybaram.solvers.navierstokes.inters.NavierStokesMPIInters
                          pybaram.solvers.euler.inters.EulerMPIInters
     :top-classes: pybaram.solver.base.elements.BaseMPIInters

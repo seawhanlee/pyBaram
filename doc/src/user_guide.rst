@@ -172,11 +172,13 @@ Type of equations and spatial discretization schemes are configured as follows.
 
 1. system --- type of equations. 
 
-    ``euler`` | ``navier-stokes`` | ``rans-sa`` | ``rans-kwsst``
+    ``euler`` | ``navier-stokes`` | ``rans-sa`` | ``rans-sa-neg`` | ``rans-kwsst``
 
     * ``rans-<model>`` --- Reynolds-averaged Navier-Stokes equation with turbulence model. 
 
         * ``rans-sa`` --- one equation Spalart-Allmaras model
+
+        * ``rans-sa-neg`` --- one equation Spalart-Allmaras negative model
 
         * ``rans-kwsst`` --- two-equation :math:`k\omega`-SST model
 

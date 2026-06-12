@@ -82,7 +82,7 @@ where, :math:`C_p` is specific heat at constant pressure, :math:`C_v` is specifi
 
 RANS Equations
 ---------------
-For RANS (Reynolds-averaged Navier-Stokes) equations, the turbulent viscosity is computed using turbulent model equation. ``pyBaram`` employs two models: the one equation `Spalart-Allmaras model <https://turbmodels.larc.nasa.gov/spalart.html#sa>`_ and the two equation `SST model <https://turbmodels.larc.nasa.gov/spalart.html#sst>`_. With turbulent viscosity :math:`\mu_t`, shear stress in viscous flux can be modified as follows:
+For RANS (Reynolds-averaged Navier-Stokes) equations, the turbulent viscosity is computed using turbulent model equation. ``pyBaram`` employs the one equation `Spalart-Allmaras model <https://tmbwg.github.io/turbmodels/spalart.html#sa>`_, its `negative variant <https://tmbwg.github.io/turbmodels/spalart.html#saneg>`_, and the two equation `SST model <https://tmbwg.github.io/turbmodels/sst.html>`_. With turbulent viscosity :math:`\mu_t`, shear stress in viscous flux can be modified as follows:
 
 .. math::
    \tau_{xx} &= 2(\mu+\mu_t)(u_x - \frac{1}{3}(u_x + v_y + w_z)) \\
@@ -284,6 +284,7 @@ Source terms are added after divergence of flux.
 
 * :mod:`pybaram.solvers.rans` module generates overall kernels to compute RANS equations
 * :mod:`pybaram.solvers.ranssa` module generates kernels for Spalart-Allmaras RANS model :cite:`Spalart1994` 
+* :mod:`pybaram.solvers.ranssaneg` module generates kernels for the negative Spalart-Allmaras RANS model :cite:`Allmaras2012`
 * :mod:`pybaram.solvers.ranskwsst` module generates kernels for SST RANS model :cite:`Menter1994` 
 
 Time Integration
