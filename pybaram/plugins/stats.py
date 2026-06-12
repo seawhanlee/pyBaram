@@ -27,18 +27,33 @@ class StatsPlugin(BasePlugin):
             if intg.mode == 'steady':
                 ele = next(iter(intg.sys.eles))
                 conservars = ele.conservars
-                header += [*conservars, 'time']
+                header += [*conservars, 'cfl', 'time']
                 if intg.impl_op == 'approx-jacobian':
                     header += ['subiter', 'subres']
-                self.t0 = perf_counter()
             elif intg.mode == 'unsteady-dts':
                 ele = next(iter(intg.sys.eles))
                 conservars = ele.conservars
-                header += ['t', *conservars]
+                header += ['t', *conservars, 'cfl', 'time']
             else:
-                header += ['t', 'dt']
+                header += ['t', 'dt', 'time']
 
+            self.t0 = perf_counter()
             self.outf = csv_write(fname, header)
+
+    def _cfl(self, intg):
+        if hasattr(intg, 'cfl'):
+            return intg.cfl
+        elif hasattr(intg, 'scfl'):
+            return intg.scfl
+        else:
+            return ''
+
+    def _interval(self):
+        t1 = perf_counter()
+        interval = (t1 - self.t0) * 1000.0
+        self.t0 = t1
+
+        return interval
 
     def __call__(self, intg):
         if self._rank == 0:
@@ -47,15 +62,18 @@ class StatsPlugin(BasePlugin):
 
             if intg.mode == 'steady':
                 # Compute time interval as millisecond unit
-                interval = (perf_counter() - self.t0) * 1000.0
                 resid = intg.resid / intg.resid0
-                stats += [*resid.tolist(), interval]
+                stats += [*resid.tolist(), self._cfl(intg), self._interval()]
                 if intg.impl_op == 'approx-jacobian':
                     stats += [intg.subitnum, intg.subres]
-                self.t0 = perf_counter()
             elif intg.mode == 'unsteady-dts':
-                for it, t, resid in intg.substats:
-                    stats = [it, t, *resid.tolist()]
+                interval = self._interval()
+                last = len(intg.substats) - 1
+
+                for i, substat in enumerate(intg.substats):
+                    it, t, resid = substat
+                    time = interval if i == last else ''
+                    stats = [it, t, *resid.tolist(), self._cfl(intg), time]
                     print(','.join(str(r) for r in stats), file=self.outf)
 
                 intg.substats.clear()
@@ -63,7 +81,7 @@ class StatsPlugin(BasePlugin):
                     self.outf.flush()
                 return
             else:
-                stats += [intg.tcurr, intg.dt]
+                stats += [intg.tcurr, intg.dt, self._interval()]
 
             print(','.join(str(r) for r in stats), file=self.outf)
 

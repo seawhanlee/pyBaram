@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from pybaram.backends.types import ArrayBank, Kernel, MetaKernel
 from pybaram.utils.misc import subclass_by_name
+from pybaram.utils.np import eps
 
 import numpy as np
 
@@ -194,7 +195,8 @@ class BaseBlockLUSGSRelaxation(BaseRelaxation):
     def _init_subiteration_controls(self):
         # Block LU-SGS subiteration controls.
         self.subiter = self._cfg.getint(self._sect, 'sub-iter', 10)
-        self.subtol = self._cfg.getfloat(self._sect, 'sub-tol', 0.1)
+        self.subrtol = self._cfg.getfloat(self._sect, 'sub-rtol', 0.1)
+        self.subatol = self._cfg.getfloat(self._sect, 'sub-atol', 0.0)
 
     def _make_update_kernels(self, ele, make_blusgs_update, make_sub_residual):
         intg = self._intg
@@ -223,7 +225,7 @@ class BaseBlockLUSGSRelaxation(BaseRelaxation):
 
         # Compute diagonal matrix
         intg.sys.eles.pre_blusgs()
-        subresid = 0.0
+        subresid = 1.0
 
         # Block LU-SGS subiterations.
         for it in range(self.subiter):
@@ -235,16 +237,19 @@ class BaseBlockLUSGSRelaxation(BaseRelaxation):
             drho = intg.sys.reduce_residual()[intg._res_idx]
 
             # Check sub-convergence
-            if it == 0:
-                drho1 = drho
+            if drho <= self.subatol:
+                subresid = 0.0
+                break
+            elif it == 0:
+                drho1 = drho if drho != 0 else eps
             else:
                 subresid = drho/drho1
-                if subresid < self.subtol:
+                if subresid < self.subrtol:
                     break
 
         intg.sys.eles.update()
         intg.sys.post(0)
-        intg.subitnum = it
+        intg.subitnum = it + 1
         intg.subres = subresid
 
         return 0, resid
