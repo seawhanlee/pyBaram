@@ -452,7 +452,11 @@ Pseudo-time relaxation method for ``unsteady-dts`` simulations is configured.
 
     `int`
 
-3. sub-tol --- the stopping criteria for block LU-SGS sub-iteration.
+3. sub-rtol --- relative tolerance for block LU-SGS sub-iteration.
+
+    `float`
+
+4. sub-atol --- absolute tolerance for block LU-SGS sub-iteration.
 
     `float`
 

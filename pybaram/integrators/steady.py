@@ -186,7 +186,8 @@ class BaseSteadyIntegrator(BaseIntegrator):
 
     def _local_dt(self):
         # Compute timestep of each cell using CFL
-        self.sys.timestep(self._cfl, self._curr_idx)
+        self.cfl = self._cfl
+        self.sys.timestep(self.cfl, self._curr_idx)
 
     def rhs(self, idx_in=0, idx_out=1):
         # Compute right hand side
