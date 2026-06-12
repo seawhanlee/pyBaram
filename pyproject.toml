@@ -48,6 +48,7 @@ packages = [
     'pybaram.solvers.navierstokes',
     'pybaram.solvers.rans',
     'pybaram.solvers.ranssa',
+    'pybaram.solvers.ranssaneg',
     'pybaram.solvers.ranskwsst',
     'pybaram.utils',
     'pybaram.writers'
