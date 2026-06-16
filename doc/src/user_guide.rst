@@ -68,6 +68,10 @@ When you run ``pybaram``, following help output is given::
 5. ``pybaram export`` --- Convert solution files to `VTK <https://vtk.org/>`_ unstructured grid file (``.vtu``) 
    or `Tecplot <https://www.tecplot.com/>`_ data file (``.plt``). In addition to volume export, this command can
    export solution data on a specified surface boundary and print the list of available surface names in the mesh.
+   Volume export writes primitive variables and solver auxiliary variables, such as viscosity and wall distance
+   when they are available. Surface export writes density, pressure, the face-normal vector, and, for viscous
+   systems, auxiliary variables and the wall shear rate vector. The wall shear stress vector can be obtained by
+   multiplying the wall shear rate by the viscosity.
 
    Example::
         
