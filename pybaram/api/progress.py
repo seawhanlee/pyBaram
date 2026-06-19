@@ -7,7 +7,7 @@ from time import perf_counter
 _UI_CHOICES = {'tqdm', 'tui', 'none'}
 
 
-def add_progress_handler(integrator, comm, ui='tqdm'):
+def add_progress_handler(integrator, comm, ui='tqdm', context=None):
     if ui not in _UI_CHOICES:
         raise ValueError("Unknown progress UI {!r}".format(ui))
 
@@ -15,9 +15,9 @@ def add_progress_handler(integrator, comm, ui='tqdm'):
         return NullProgressHandler()
 
     handler = (
-        RichProgressHandler(integrator)
+        RichProgressHandler(integrator, context)
         if ui == 'tui'
-        else TqdmProgressHandler(integrator)
+        else TqdmProgressHandler(integrator, context)
     )
     integrator.completed_handler.append(handler)
 
@@ -52,11 +52,15 @@ class NullProgressHandler:
     def __call__(self, intg):
         pass
 
+    def complete_context(self, intg):
+        pass
+
 
 class TqdmProgressHandler:
-    def __init__(self, intg):
+    def __init__(self, intg, context=None):
         from tqdm import tqdm
 
+        self._context = context
         snap = progress_snapshot(intg)
         self._completed = snap['completed']
         self._bar = tqdm(
@@ -71,15 +75,31 @@ class TqdmProgressHandler:
     def stop(self):
         self._bar.close()
 
+    def complete_context(self, intg):
+        if self._context is not None:
+            self._context.complete_case()
+            self._set_postfix()
+
     def __call__(self, intg):
         completed = progress_snapshot(intg)['completed']
         update = max(completed - self._completed, 0)
         self._completed += update
         self._bar.update(update)
+        self._set_postfix()
+
+    def _set_postfix(self):
+        if self._context is None:
+            return
+
+        self._bar.set_postfix(
+            aoa=self._context.current,
+            sweep='{}/{}'.format(self._context.completed, self._context.total)
+        )
 
 
 class RichProgressHandler:
-    def __init__(self, intg):
+    def __init__(self, intg, context=None):
+        self._context = context
         self._started = False
         self._disabled = False
         self._message = None
@@ -112,6 +132,23 @@ class RichProgressHandler:
             return
 
         snap = progress_snapshot(intg)
+        self._sweep_progress = None
+        self._sweep_task = None
+        if context is not None:
+            self._sweep_progress = Progress(
+                TextColumn("[bold]AOA sweep[/bold]"),
+                BarColumn(),
+                TaskProgressColumn(),
+                TimeElapsedColumn(),
+                console=self._console,
+                transient=False
+            )
+            self._sweep_task = self._sweep_progress.add_task(
+                'sweep',
+                total=context.total,
+                completed=context.completed
+            )
+
         self._progress = Progress(
             TextColumn("[bold]pyBaram[/bold]"),
             BarColumn(),
@@ -152,8 +189,26 @@ class RichProgressHandler:
             return
 
         snap = progress_snapshot(intg)
+        self._update_context_progress()
         self._progress.update(self._task, completed=snap['completed'])
         self._live.update(self._render(intg))
+
+    def complete_context(self, intg):
+        if self._disabled or self._context is None:
+            return
+
+        self._context.complete_case()
+        self._update_context_progress()
+        self._live.update(self._render(intg))
+
+    def _update_context_progress(self):
+        if self._context is None:
+            return
+
+        self._sweep_progress.update(
+            self._sweep_task,
+            completed=self._context.completed
+        )
 
     def _render(self, intg):
         from rich.console import Group
@@ -171,6 +226,13 @@ class RichProgressHandler:
             table.add_row(name, value)
 
         elapsed = perf_counter() - self._start_time
+        if self._context is not None:
+            table.add_row('current aoa', self._context.current)
+            table.add_row(
+                'sweeps',
+                '{}/{}'.format(self._context.completed, self._context.total)
+            )
+
         table.add_row('elapsed', _format_seconds(elapsed))
         table.add_row('remaining', _format_remaining(
             elapsed,
@@ -178,8 +240,13 @@ class RichProgressHandler:
             snap['total']
         ))
 
+        items = []
+        if self._sweep_progress is not None:
+            items.append(self._sweep_progress)
+        items.extend([self._progress, table])
+
         return Panel(
-            Group(self._progress, table),
+            Group(*items),
             title='pyBaram simulation',
             border_style='blue'
         )

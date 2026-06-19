@@ -100,10 +100,10 @@ When you run ``pybaram``, following help output is given::
 
         user@Computer ~/pyBaram$ pybaram sweep mesh.pbrm conf.ini --aoa 0,2,4 --out aoa-study --ui tui
 
-   With ``--ui tui``, the sweep command shows one progress display for the
-   number of completed AOA cases and the angle currently running. Per-case
-   solver progress displays are disabled during sweeps to avoid recreating a
-   separate TUI for every angle.
+   With ``--ui tui``, the sweep command adds a sweep progress bar above the
+   normal solver progress display. It shows the number of completed AOA cases
+   and the angle currently running while preserving realtime per-case solver
+   status.
 
    Existing non-empty case directories are rejected to avoid appending new
    force and statistics rows to old CSV files. Use ``--overwrite`` only when

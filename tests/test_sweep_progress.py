@@ -2,30 +2,28 @@
 import unittest
 
 from pybaram.api.sweep_progress import (
-    NullSweepProgress,
-    make_sweep_progress
+    SweepProgressContext
 )
 
 
-class FakeComm:
-    def __init__(self, rank):
-        self.rank = rank
-
-
 class SweepProgressTest(unittest.TestCase):
-    def test_none_ui_returns_null_progress(self):
-        progress = make_sweep_progress([0, 1], FakeComm(0), 'none')
+    def test_context_tracks_current_case(self):
+        context = SweepProgressContext([0, 2])
 
-        self.assertIsInstance(progress, NullSweepProgress)
+        context.start_case(2, 1)
 
-    def test_non_root_rank_returns_null_progress(self):
-        progress = make_sweep_progress([0, 1], FakeComm(1), 'tui')
+        self.assertEqual(context.current, '2')
+        self.assertEqual(context.completed, 0)
+        self.assertEqual(context.total, 2)
 
-        self.assertIsInstance(progress, NullSweepProgress)
+    def test_context_marks_complete(self):
+        context = SweepProgressContext([0, 2])
 
-    def test_invalid_ui_raises(self):
-        with self.assertRaises(ValueError):
-            make_sweep_progress([0, 1], FakeComm(0), 'bad-ui')
+        context.start_case(2, 1)
+        context.complete_case()
+
+        self.assertEqual(context.current, 'complete')
+        self.assertEqual(context.completed, 2)
 
 
 if __name__ == '__main__':

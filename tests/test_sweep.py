@@ -114,7 +114,7 @@ class SweepCaseDirTest(unittest.TestCase):
             self.assertTrue(os.path.isdir(case_dir))
             self.assertEqual(os.listdir(case_dir), [])
 
-    def test_run_aoa_case_disables_solver_ui(self):
+    def test_run_aoa_case_preserves_solver_ui(self):
         with tempfile.TemporaryDirectory() as tmp:
             base_cfg = os.path.join(tmp, 'base.ini')
             with open(base_cfg, 'w') as outf:
@@ -139,11 +139,14 @@ class SweepCaseDirTest(unittest.TestCase):
                 FakeComm(),
                 False,
                 rows,
-                fake_run,
-                FakeMesh
+                lambda mesh, cfg, comm, ui, progress_context:
+                    fake_run(mesh, cfg, comm, ui),
+                FakeMesh,
+                'tui',
+                object()
             )
 
-            self.assertEqual(calls[0][3], 'none')
+            self.assertEqual(calls[0][3], 'tui')
             self.assertEqual(rows[0]['case'], 'aoa2')
             self.assertEqual(rows[0]['cl_p'], '0.25')
             self.assertTrue(os.path.exists(os.path.join(tmp, 'aoa2', 'config.ini')))

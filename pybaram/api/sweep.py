@@ -10,7 +10,7 @@ from pybaram.inifile import INIFile
 def run_aoa_sweep(meshf, inif, aoas, outdir='sweep-aoa', ui='tui',
                   comm='none', overwrite=False):
     from pybaram.api.simulation import run
-    from pybaram.api.sweep_progress import make_sweep_progress
+    from pybaram.api.sweep_progress import SweepProgressContext
     from pybaram.readers.native import NativeReader
     from pybaram.utils.mpi import mpi_init
 
@@ -26,28 +26,25 @@ def run_aoa_sweep(meshf, inif, aoas, outdir='sweep-aoa', ui='tui',
         os.makedirs(outdir, exist_ok=True)
     comm.Barrier()
 
-    sweep_progress = make_sweep_progress(aoas, comm, ui)
+    sweep_context = SweepProgressContext(aoas) if ui != 'none' else None
     summary_rows = []
 
-    try:
-        sweep_progress.start()
+    for i, aoa in enumerate(aoas):
+        if sweep_context is not None:
+            sweep_context.start_case(aoa, i)
 
-        for i, aoa in enumerate(aoas):
-            sweep_progress.start_case(aoa, i)
-            _run_aoa_case(
-                meshf, inif, outdir, root, aoa, comm, overwrite,
-                summary_rows, run, NativeReader
-            )
-            sweep_progress.complete_case(aoa, i)
-    finally:
-        sweep_progress.stop()
+        _run_aoa_case(
+            meshf, inif, outdir, root, aoa, comm, overwrite,
+            summary_rows, run, NativeReader, ui, sweep_context
+        )
 
     if comm.rank == 0:
         write_sweep_summary(os.path.join(outdir, 'sweep.csv'), summary_rows)
 
 
 def _run_aoa_case(meshf, inif, outdir, root, aoa, comm, overwrite,
-                  summary_rows, run, NativeReader):
+                  summary_rows, run, NativeReader, ui='none',
+                  sweep_context=None):
     case_name = aoa_case_name(aoa)
     case_dir = os.path.join(outdir, case_name)
 
@@ -74,7 +71,7 @@ def _run_aoa_case(meshf, inif, outdir, root, aoa, comm, overwrite,
     os.chdir(case_dir)
     mesh = NativeReader(meshf)
     try:
-        run(mesh, cfg, comm=comm, ui='none')
+        run(mesh, cfg, comm=comm, ui=ui, progress_context=sweep_context)
     finally:
         mesh.close()
         os.chdir(root)
