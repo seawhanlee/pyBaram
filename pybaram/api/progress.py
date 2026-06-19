@@ -66,7 +66,8 @@ class TqdmProgressHandler:
         self._bar = tqdm(
             total=snap['total'],
             initial=snap['completed'],
-            unit_scale=snap['mode'] in ('unsteady', 'unsteady-dts')
+            unit_scale=snap['mode'] in ('unsteady', 'unsteady-dts'),
+            leave=context is None
         )
 
     def start(self):
@@ -141,7 +142,7 @@ class RichProgressHandler:
                 TaskProgressColumn(),
                 TimeElapsedColumn(),
                 console=self._console,
-                transient=False
+                transient=context is not None
             )
             self._sweep_task = self._sweep_progress.add_task(
                 'sweep',
@@ -155,7 +156,7 @@ class RichProgressHandler:
             TaskProgressColumn(),
             TimeElapsedColumn(),
             console=self._console,
-            transient=False
+            transient=context is not None
         )
         self._task = self._progress.add_task(
             'simulation',
@@ -166,7 +167,7 @@ class RichProgressHandler:
             self._render(intg),
             console=self._console,
             refresh_per_second=4,
-            transient=False
+            transient=context is not None
         )
 
     def start(self):
