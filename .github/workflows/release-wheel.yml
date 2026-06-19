@@ -1,13 +1,13 @@
 name: Release wheel
 
 on:
-  release:
-    types:
-      - published
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag to upload the wheel to, for example v0.8.0
+        description: Release tag to build and release, for example v0.8.0
         required: true
         type: string
 
@@ -16,13 +16,10 @@ permissions:
 
 jobs:
   build-wheel:
-    name: Build and upload wheel
+    name: Build wheel and publish release
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
       - name: Set release tag
         id: release
         shell: bash
@@ -30,10 +27,15 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             tag="${{ inputs.tag }}"
           else
-            tag="${{ github.event.release.tag_name }}"
+            tag="${GITHUB_REF_NAME}"
           fi
 
           echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release.outputs.tag }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -85,9 +87,17 @@ jobs:
           path: dist/*.whl
           if-no-files-found: error
 
-      - name: Upload wheel to release
+      - name: Create release and upload wheel
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          gh release upload "${{ steps.release.outputs.tag }}" dist/*.whl --clobber
+          tag="${{ steps.release.outputs.tag }}"
+
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            gh release upload "${tag}" dist/*.whl --clobber
+          else
+            gh release create "${tag}" dist/*.whl \
+              --title "${tag}" \
+              --generate-notes
+          fi
