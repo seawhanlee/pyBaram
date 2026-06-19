@@ -5,6 +5,7 @@ import tempfile
 import unittest
 
 from pybaram.api.sweep import (
+    _run_aoa_case,
     aoa_case_name,
     collect_force_summary,
     parse_sweep_range,
@@ -12,6 +13,25 @@ from pybaram.api.sweep import (
     prepare_case_dir,
     write_sweep_summary
 )
+
+
+class FakeComm:
+    rank = 0
+
+    def Barrier(self):
+        pass
+
+    def bcast(self, value, root=0):
+        return value
+
+
+class FakeMesh:
+    def __init__(self, meshf):
+        self.meshf = meshf
+        self.closed = False
+
+    def close(self):
+        self.closed = True
 
 
 class SweepValuesTest(unittest.TestCase):
@@ -93,6 +113,40 @@ class SweepCaseDirTest(unittest.TestCase):
 
             self.assertTrue(os.path.isdir(case_dir))
             self.assertEqual(os.listdir(case_dir), [])
+
+    def test_run_aoa_case_disables_solver_ui(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_cfg = os.path.join(tmp, 'base.ini')
+            with open(base_cfg, 'w') as outf:
+                outf.write('[constants]\naoa = 0\n')
+
+            calls = []
+
+            def fake_run(mesh, cfg, comm, ui):
+                calls.append((mesh, cfg, comm, ui))
+                with open('force_airfoil.csv', 'w', newline='') as outf:
+                    writer = csv.writer(outf)
+                    writer.writerow(['iter', 'cl_p'])
+                    writer.writerow([1, 0.25])
+
+            rows = []
+            _run_aoa_case(
+                os.path.join(tmp, 'mesh.pbrm'),
+                base_cfg,
+                tmp,
+                os.getcwd(),
+                2,
+                FakeComm(),
+                False,
+                rows,
+                fake_run,
+                FakeMesh
+            )
+
+            self.assertEqual(calls[0][3], 'none')
+            self.assertEqual(rows[0]['case'], 'aoa2')
+            self.assertEqual(rows[0]['cl_p'], '0.25')
+            self.assertTrue(os.path.exists(os.path.join(tmp, 'aoa2', 'config.ini')))
 
 
 if __name__ == '__main__':

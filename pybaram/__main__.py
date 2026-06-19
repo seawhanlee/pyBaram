@@ -142,8 +142,8 @@ def build_parser():
     ap_sweep.add_argument(
         '--ui',
         choices=('tqdm', 'tui', 'none'),
-        default='none',
-        help='progress display mode for each sweep case'
+        default='tui',
+        help='sweep progress display mode'
     )
     ap_sweep.add_argument(
         '--overwrite',

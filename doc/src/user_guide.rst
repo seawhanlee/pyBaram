@@ -96,9 +96,14 @@ When you run ``pybaram``, following help output is given::
    ``aoa2``; negative values use names such as ``aoan1`` and ``aoan2``.
    The ``sweep-aoa/sweep.csv`` file summarizes the final row from each
    ``force_*.csv`` file. Use ``--out`` to choose another directory and ``--ui``
-   to choose the per-case progress display::
+   to choose the sweep progress display::
 
         user@Computer ~/pyBaram$ pybaram sweep mesh.pbrm conf.ini --aoa 0,2,4 --out aoa-study --ui tui
+
+   With ``--ui tui``, the sweep command shows one progress display for the
+   number of completed AOA cases and the angle currently running. Per-case
+   solver progress displays are disabled during sweeps to avoid recreating a
+   separate TUI for every angle.
 
    Existing non-empty case directories are rejected to avoid appending new
    force and statistics rows to old CSV files. Use ``--overwrite`` only when

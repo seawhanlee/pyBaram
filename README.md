@@ -84,6 +84,10 @@ Use a custom output directory or progress mode with:
 pybaram sweep mesh.pbrm config.ini --aoa 0,2,4 --out aoa-study --ui tui
 ```
 
+For sweeps, `--ui tui` shows one sweep-level dashboard with the number of
+completed AOA cases and the angle currently running. Individual solver progress
+bars are disabled inside each case so the sweep display remains stable.
+
 If a case directory already exists and is not empty, the sweep stops rather than
 appending to old CSV files. Use `--overwrite` only when you intentionally want
 to replace existing case directories:

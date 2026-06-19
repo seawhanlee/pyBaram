@@ -37,7 +37,7 @@ class CliParserTest(unittest.TestCase):
         ])
 
         self.assertEqual(args.aoa, '0,2,4')
-        self.assertEqual(args.ui, 'none')
+        self.assertEqual(args.ui, 'tui')
         self.assertEqual(args.out, 'sweep-aoa')
         self.assertIs(args.process, process_sweep)
 

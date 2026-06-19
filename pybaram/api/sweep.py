@@ -7,9 +7,10 @@ import shutil
 from pybaram.inifile import INIFile
 
 
-def run_aoa_sweep(meshf, inif, aoas, outdir='sweep-aoa', ui='none',
+def run_aoa_sweep(meshf, inif, aoas, outdir='sweep-aoa', ui='tui',
                   comm='none', overwrite=False):
     from pybaram.api.simulation import run
+    from pybaram.api.sweep_progress import make_sweep_progress
     from pybaram.readers.native import NativeReader
     from pybaram.utils.mpi import mpi_init
 
@@ -25,52 +26,69 @@ def run_aoa_sweep(meshf, inif, aoas, outdir='sweep-aoa', ui='none',
         os.makedirs(outdir, exist_ok=True)
     comm.Barrier()
 
+    sweep_progress = make_sweep_progress(aoas, comm, ui)
     summary_rows = []
-    for aoa in aoas:
-        case_name = aoa_case_name(aoa)
-        case_dir = os.path.join(outdir, case_name)
 
-        error = None
-        if comm.rank == 0:
-            try:
-                prepare_case_dir(case_dir, overwrite)
-            except RuntimeError as exc:
-                error = str(exc)
+    try:
+        sweep_progress.start()
 
-        error = comm.bcast(error, root=0)
-        if error:
-            raise RuntimeError(error)
-
-        comm.Barrier()
-
-        cfg = INIFile(inif)
-        cfg.set('constants', 'aoa', format_sweep_value(aoa))
-
-        if comm.rank == 0:
-            with open(os.path.join(case_dir, 'config.ini'), 'w') as outf:
-                outf.write(cfg.tostr())
-
-        os.chdir(case_dir)
-        mesh = NativeReader(meshf)
-        try:
-            run(mesh, cfg, comm=comm, ui=ui)
-        finally:
-            mesh.close()
-            os.chdir(root)
-
-        if comm.rank == 0:
-            rows = collect_force_summary(case_dir, aoa)
-            if rows:
-                summary_rows.extend(rows)
-            else:
-                summary_rows.append({
-                    'aoa': format_sweep_value(aoa),
-                    'case': case_name,
-                    'force_file': ''
-                })
+        for i, aoa in enumerate(aoas):
+            sweep_progress.start_case(aoa, i)
+            _run_aoa_case(
+                meshf, inif, outdir, root, aoa, comm, overwrite,
+                summary_rows, run, NativeReader
+            )
+            sweep_progress.complete_case(aoa, i)
+    finally:
+        sweep_progress.stop()
 
     if comm.rank == 0:
         write_sweep_summary(os.path.join(outdir, 'sweep.csv'), summary_rows)
+
+
+def _run_aoa_case(meshf, inif, outdir, root, aoa, comm, overwrite,
+                  summary_rows, run, NativeReader):
+    case_name = aoa_case_name(aoa)
+    case_dir = os.path.join(outdir, case_name)
+
+    error = None
+    if comm.rank == 0:
+        try:
+            prepare_case_dir(case_dir, overwrite)
+        except RuntimeError as exc:
+            error = str(exc)
+
+    error = comm.bcast(error, root=0)
+    if error:
+        raise RuntimeError(error)
+
+    comm.Barrier()
+
+    cfg = INIFile(inif)
+    cfg.set('constants', 'aoa', format_sweep_value(aoa))
+
+    if comm.rank == 0:
+        with open(os.path.join(case_dir, 'config.ini'), 'w') as outf:
+            outf.write(cfg.tostr())
+
+    os.chdir(case_dir)
+    mesh = NativeReader(meshf)
+    try:
+        run(mesh, cfg, comm=comm, ui='none')
+    finally:
+        mesh.close()
+        os.chdir(root)
+
+    if comm.rank == 0:
+        rows = collect_force_summary(case_dir, aoa)
+        if rows:
+            summary_rows.extend(rows)
+        else:
+            summary_rows.append({
+                'aoa': format_sweep_value(aoa),
+                'case': case_name,
+                'force_file': ''
+            })
 
 
 def parse_sweep_values(values):
