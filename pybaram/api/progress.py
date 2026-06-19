@@ -111,6 +111,7 @@ class RichProgressHandler:
         self._context = context
         self._started = False
         self._disabled = False
+        self._key_reader = None
         self._message = None
         self._start_time = perf_counter()
 
@@ -140,6 +141,7 @@ class RichProgressHandler:
             )
             return
 
+        self._key_reader = _SweepKeyReader(context) if context is not None else None
         snap = progress_snapshot(intg)
         self._sweep_progress = None
         self._sweep_task = None
@@ -186,9 +188,13 @@ class RichProgressHandler:
             return
 
         self._live.start()
+        if self._key_reader is not None:
+            self._key_reader.start()
         self._started = True
 
     def stop(self):
+        if self._key_reader is not None:
+            self._key_reader.stop()
         if self._started:
             self._live.stop()
             self._started = False
@@ -197,6 +203,8 @@ class RichProgressHandler:
         if self._disabled:
             return
 
+        if self._key_reader is not None:
+            self._key_reader.poll()
         snap = progress_snapshot(intg)
         if self._context is not None:
             self._context.update_case(_case_residual(intg))
@@ -244,6 +252,8 @@ class RichProgressHandler:
                 'sweeps',
                 '{}/{}'.format(self._context.completed, self._context.total)
             )
+            if self._context.stop_requested:
+                status_table.add_row('stop', 'requested after current aoa')
 
         status_table.add_row('elapsed', _format_seconds(elapsed))
         status_table.add_row('remaining', _format_remaining(
@@ -272,16 +282,85 @@ class RichProgressHandler:
         )
 
     def _sweep_residual_table(self):
+        from rich.console import Group
         from rich.table import Table
+        from rich.text import Text
 
-        table = Table(title='Sweep residuals', expand=True)
-        table.add_column('AOA', style='cyan', no_wrap=True)
-        table.add_column('Residual')
+        table = Table.grid(expand=True, padding=(0, 2))
+        table.add_column(style='cyan', no_wrap=True)
+        table.add_column()
+        table.add_row('AOA', 'Residual')
 
         for aoa, residual in self._context.rows:
             table.add_row(aoa, residual)
 
-        return table
+        return Group(Text('Sweep residuals', style='bold'), table)
+
+
+class _SweepKeyReader:
+    def __init__(self, context):
+        self._context = context
+        self._active = False
+        self._fd = None
+        self._old_attrs = None
+        self._msvcrt = None
+        self._select = None
+        self._termios = None
+
+    def start(self):
+        if not sys.stdin.isatty():
+            return
+
+        try:
+            if sys.platform == 'win32':
+                import msvcrt
+                self._msvcrt = msvcrt
+            else:
+                import select
+                import termios
+                import tty
+
+                self._fd = sys.stdin.fileno()
+                self._old_attrs = termios.tcgetattr(self._fd)
+                tty.setcbreak(self._fd)
+                self._select = select
+                self._termios = termios
+        except Exception:
+            return
+
+        self._active = True
+
+    def stop(self):
+        if not self._active:
+            return
+
+        if self._termios is not None and self._old_attrs is not None:
+            self._termios.tcsetattr(
+                self._fd,
+                self._termios.TCSADRAIN,
+                self._old_attrs
+            )
+        self._active = False
+
+    def poll(self):
+        if not self._active:
+            return
+
+        key = self._read_key()
+        if key in ('q', 'Q'):
+            self._context.request_stop()
+
+    def _read_key(self):
+        if self._msvcrt is not None:
+            if self._msvcrt.kbhit():
+                return self._msvcrt.getwch()
+            return None
+
+        readable, _, _ = self._select.select([sys.stdin], [], [], 0)
+        if readable:
+            return sys.stdin.read(1)
+
+        return None
 
 
 def _time_total(intg):

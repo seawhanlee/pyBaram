@@ -35,6 +35,13 @@ class SweepProgressTest(unittest.TestCase):
 
         self.assertEqual(context.rows, [('0', 'rho = 0.5')])
 
+    def test_context_tracks_stop_request(self):
+        context = SweepProgressContext([0, 2])
+
+        context.request_stop()
+
+        self.assertTrue(context.stop_requested)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -6,6 +6,7 @@ import unittest
 
 from pybaram.api.sweep import (
     _run_aoa_case,
+    _sync_stop_requested,
     aoa_case_name,
     collect_force_summary,
     parse_sweep_range,
@@ -23,6 +24,16 @@ class FakeComm:
 
     def bcast(self, value, root=0):
         return value
+
+
+class FakeNonRootComm(FakeComm):
+    rank = 1
+
+    def __init__(self, value):
+        self.value = value
+
+    def bcast(self, value, root=0):
+        return self.value
 
 
 class FakeMesh:
@@ -122,8 +133,8 @@ class SweepCaseDirTest(unittest.TestCase):
 
             calls = []
 
-            def fake_run(mesh, cfg, comm, ui):
-                calls.append((mesh, cfg, comm, ui))
+            def fake_run(mesh, cfg, comm, ui, suppress_final_status=False):
+                calls.append((mesh, cfg, comm, ui, suppress_final_status))
                 with open('force_airfoil.csv', 'w', newline='') as outf:
                     writer = csv.writer(outf)
                     writer.writerow(['iter', 'cl_p'])
@@ -139,17 +150,37 @@ class SweepCaseDirTest(unittest.TestCase):
                 FakeComm(),
                 False,
                 rows,
-                lambda mesh, cfg, comm, ui, progress_context:
-                    fake_run(mesh, cfg, comm, ui),
+                lambda mesh, cfg, comm, ui, progress_context,
+                       suppress_final_status:
+                    fake_run(mesh, cfg, comm, ui, suppress_final_status),
                 FakeMesh,
                 'tui',
                 object()
             )
 
             self.assertEqual(calls[0][3], 'tui')
+            self.assertTrue(calls[0][4])
             self.assertEqual(rows[0]['case'], 'aoa2')
             self.assertEqual(rows[0]['cl_p'], '0.25')
             self.assertTrue(os.path.exists(os.path.join(tmp, 'aoa2', 'config.ini')))
+
+
+class SweepStopRequestTest(unittest.TestCase):
+    def test_sync_stop_requested_uses_root_context(self):
+        from pybaram.api.sweep_progress import SweepProgressContext
+
+        context = SweepProgressContext([0, 2])
+        context.request_stop()
+
+        self.assertTrue(_sync_stop_requested(FakeComm(), context))
+
+    def test_sync_stop_requested_updates_non_root_context(self):
+        from pybaram.api.sweep_progress import SweepProgressContext
+
+        context = SweepProgressContext([0, 2])
+
+        self.assertTrue(_sync_stop_requested(FakeNonRootComm(True), context))
+        self.assertTrue(context.stop_requested)
 
 
 if __name__ == '__main__':

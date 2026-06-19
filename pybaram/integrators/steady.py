@@ -104,11 +104,13 @@ class BaseSteadyIntegrator(BaseIntegrator):
 
         if self.iter == self.itermax:
             self.isconv = False
-            print(
-                "Not converged : current iteration already equals max-iter {}".format(
-                    self.iter
+            if self._show_final_status:
+                print(
+                    "Not converged : current iteration already equals "
+                    "max-iter {}".format(
+                        self.iter
+                    )
                 )
-            )
             return
 
         while self.iter < self.itermax:
@@ -202,6 +204,9 @@ class BaseSteadyIntegrator(BaseIntegrator):
         return self.sys.residual(idx_out)
 
     def print_res(self, residual):
+        if not self._show_final_status:
+            return
+
         # Print residual result
         idx = self._res_idx
         res = residual[idx]
@@ -211,6 +216,10 @@ class BaseSteadyIntegrator(BaseIntegrator):
         else:
             print("Not converged : Residual of {} = {:05g} > {:05g}".format(
                 self.conservars[idx], res, self.tol))
+
+    @property
+    def _show_final_status(self):
+        return not getattr(self, '_suppress_final_status', False)
 
 
 class EulerExplicit(BaseSteadyIntegrator):

@@ -10,6 +10,7 @@ class SweepProgressContext:
         ]
         self.current = 'pending'
         self.completed = 0
+        self.stop_requested = False
         self._index = None
 
     @property
@@ -33,6 +34,9 @@ class SweepProgressContext:
             return
 
         self._cases[self._index]['residual'] = residual
+
+    def request_stop(self):
+        self.stop_requested = True
 
     def complete_case(self, residual=None):
         if self._index is None:

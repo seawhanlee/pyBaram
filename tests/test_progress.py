@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
+import io
 import unittest
+
+from contextlib import redirect_stdout
 
 from pybaram.api.progress import (
     NullProgressHandler,
@@ -7,6 +10,7 @@ from pybaram.api.progress import (
     add_progress_handler,
     progress_snapshot
 )
+from pybaram.integrators.steady import BaseSteadyIntegrator
 
 
 class FakeComm:
@@ -128,6 +132,21 @@ class RemainingTimeTest(unittest.TestCase):
 
     def test_remaining_time_is_unknown_without_total(self):
         self.assertEqual(_format_remaining(30, 0, 0), 'unknown')
+
+
+class FinalStatusOutputTest(unittest.TestCase):
+    def test_final_status_can_be_suppressed(self):
+        intg = BaseSteadyIntegrator.__new__(BaseSteadyIntegrator)
+        intg._suppress_final_status = True
+        intg._res_idx = 0
+        intg.conservars = ['rho']
+        intg.tol = 1e-8
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            intg.print_res([1e-10])
+
+        self.assertEqual(out.getvalue(), '')
 
 
 if __name__ == '__main__':

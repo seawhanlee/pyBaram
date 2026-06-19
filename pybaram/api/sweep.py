@@ -37,6 +37,9 @@ def run_aoa_sweep(meshf, inif, aoas, outdir='sweep-aoa', ui='tui',
             meshf, inif, outdir, root, aoa, comm, overwrite,
             summary_rows, run, NativeReader, ui, sweep_context
         )
+        stop_requested = _sync_stop_requested(comm, sweep_context)
+        if stop_requested:
+            break
 
     if comm.rank == 0:
         write_sweep_summary(os.path.join(outdir, 'sweep.csv'), summary_rows)
@@ -71,7 +74,10 @@ def _run_aoa_case(meshf, inif, outdir, root, aoa, comm, overwrite,
     os.chdir(case_dir)
     mesh = NativeReader(meshf)
     try:
-        run(mesh, cfg, comm=comm, ui=ui, progress_context=sweep_context)
+        run(
+            mesh, cfg, comm=comm, ui=ui, progress_context=sweep_context,
+            suppress_final_status=True
+        )
     finally:
         mesh.close()
         os.chdir(root)
@@ -86,6 +92,18 @@ def _run_aoa_case(meshf, inif, outdir, root, aoa, comm, overwrite,
                 'case': case_name,
                 'force_file': ''
             })
+
+
+def _sync_stop_requested(comm, sweep_context):
+    if sweep_context is None:
+        return False
+
+    stop_requested = sweep_context.stop_requested if comm.rank == 0 else None
+    stop_requested = comm.bcast(stop_requested, root=0)
+    if stop_requested:
+        sweep_context.request_stop()
+
+    return stop_requested
 
 
 def parse_sweep_values(values):

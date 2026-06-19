@@ -5,7 +5,8 @@ from pybaram.api.progress import add_progress_handler
 from pybaram.utils.mpi import mpi_init
 
 
-def run(mesh, cfg, be='none', comm='none', ui='tqdm', progress_context=None):
+def run(mesh, cfg, be='none', comm='none', ui='tqdm', progress_context=None,
+        suppress_final_status=False):
     """
     Fresh run from mesh and configuration files.
 
@@ -21,11 +22,14 @@ def run(mesh, cfg, be='none', comm='none', ui='tqdm', progress_context=None):
     :type ui: str
     """
     # Run common
-    _common(mesh, None, cfg, be, comm, ui, progress_context)
+    _common(
+        mesh, None, cfg, be, comm, ui, progress_context,
+        suppress_final_status
+    )
 
 
 def restart(mesh, soln, cfg, be='none', comm='none', ui='tqdm',
-            progress_context=None):
+            progress_context=None, suppress_final_status=False):
     """
     Restarted run from mesh and configuration files.
 
@@ -48,10 +52,14 @@ def restart(mesh, soln, cfg, be='none', comm='none', ui='tqdm',
         raise RuntimeError('Solution is not computed by the mesh')
 
     # Run common
-    _common(mesh, soln, cfg, be, comm, ui, progress_context)
+    _common(
+        mesh, soln, cfg, be, comm, ui, progress_context,
+        suppress_final_status
+    )
 
 
-def _common(msh, soln, cfg, backend, comm, ui, progress_context):
+def _common(msh, soln, cfg, backend, comm, ui, progress_context,
+            suppress_final_status):
     if comm == 'none':        
         # Initiate MPI comm world
         comm = mpi_init()
@@ -62,6 +70,7 @@ def _common(msh, soln, cfg, backend, comm, ui, progress_context):
 
     # Get integrator
     integrator = get_integrator(backend, cfg, msh, soln, comm)
+    integrator._suppress_final_status = suppress_final_status
 
     # Add progress display
     progress = add_progress_handler(integrator, comm, ui, progress_context)
