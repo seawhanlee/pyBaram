@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag to build and release, for example v0.9.3
+        description: Release tag to build and release, for example v0.9.4
         required: true
         type: string
 

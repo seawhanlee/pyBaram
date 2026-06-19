@@ -103,7 +103,9 @@ When you run ``pybaram``, following help output is given::
    With ``--ui tui``, the sweep command adds a sweep progress bar above the
    normal solver progress display. It shows the number of completed AOA cases
    and the angle currently running while preserving realtime per-case solver
-   status.
+   status. The right side of the TUI lists each target AOA and its
+   latest/final residual so completed cases can be compared while the sweep
+   continues.
 
    Existing non-empty case directories are rejected to avoid appending new
    force and statistics rows to old CSV files. Use ``--overwrite`` only when

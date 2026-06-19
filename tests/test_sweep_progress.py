@@ -15,15 +15,25 @@ class SweepProgressTest(unittest.TestCase):
         self.assertEqual(context.current, '2')
         self.assertEqual(context.completed, 0)
         self.assertEqual(context.total, 2)
+        self.assertEqual(context.rows, [('0', 'pending'), ('2', 'running')])
 
     def test_context_marks_complete(self):
         context = SweepProgressContext([0, 2])
 
         context.start_case(2, 1)
-        context.complete_case()
+        context.complete_case('rho = 1e-6')
 
         self.assertEqual(context.current, 'complete')
         self.assertEqual(context.completed, 2)
+        self.assertEqual(context.rows[1], ('2', 'rho = 1e-6'))
+
+    def test_context_updates_running_residual(self):
+        context = SweepProgressContext([0])
+
+        context.start_case(0, 0)
+        context.update_case('rho = 0.5')
+
+        self.assertEqual(context.rows, [('0', 'rho = 0.5')])
 
 
 if __name__ == '__main__':

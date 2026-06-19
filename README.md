@@ -86,7 +86,9 @@ pybaram sweep mesh.pbrm config.ini --aoa 0,2,4 --out aoa-study --ui tui
 
 For sweeps, `--ui tui` adds a sweep progress bar above the normal solver
 progress display. It shows the number of completed AOA cases and the angle
-currently running while preserving realtime per-case solver status.
+currently running while preserving realtime per-case solver status. The right
+side of the TUI lists each target AOA and its latest/final residual so completed
+cases can be compared while the sweep continues.
 
 If a case directory already exists and is not empty, the sweep stops rather than
 appending to old CSV files. Use `--overwrite` only when you intentionally want

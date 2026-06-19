@@ -78,7 +78,7 @@ class TqdmProgressHandler:
 
     def complete_context(self, intg):
         if self._context is not None:
-            self._context.complete_case()
+            self._context.complete_case(_case_residual(intg))
             self._set_postfix()
 
     def __call__(self, intg):
@@ -94,8 +94,16 @@ class TqdmProgressHandler:
 
         self._bar.set_postfix(
             aoa=self._context.current,
+            residual=self._current_context_residual(),
             sweep='{}/{}'.format(self._context.completed, self._context.total)
         )
+
+    def _current_context_residual(self):
+        for aoa, residual in self._context.rows:
+            if aoa == self._context.current:
+                return residual
+
+        return ''
 
 
 class RichProgressHandler:
@@ -190,6 +198,8 @@ class RichProgressHandler:
             return
 
         snap = progress_snapshot(intg)
+        if self._context is not None:
+            self._context.update_case(_case_residual(intg))
         self._update_context_progress()
         self._progress.update(self._task, completed=snap['completed'])
         self._live.update(self._render(intg))
@@ -198,7 +208,7 @@ class RichProgressHandler:
         if self._disabled or self._context is None:
             return
 
-        self._context.complete_case()
+        self._context.complete_case(_case_residual(intg))
         self._update_context_progress()
         self._live.update(self._render(intg))
 
@@ -212,6 +222,7 @@ class RichProgressHandler:
         )
 
     def _render(self, intg):
+        from rich.columns import Columns
         from rich.console import Group
         from rich.panel import Panel
         from rich.table import Table
@@ -219,23 +230,23 @@ class RichProgressHandler:
         snap = progress_snapshot(intg)
         rows = snap['rows']
 
-        table = Table.grid(padding=(0, 2))
-        table.add_column(style='cyan', no_wrap=True)
-        table.add_column()
+        status_table = Table.grid(padding=(0, 2))
+        status_table.add_column(style='cyan', no_wrap=True)
+        status_table.add_column()
 
         for name, value in rows:
-            table.add_row(name, value)
+            status_table.add_row(name, value)
 
         elapsed = perf_counter() - self._start_time
         if self._context is not None:
-            table.add_row('current aoa', self._context.current)
-            table.add_row(
+            status_table.add_row('current aoa', self._context.current)
+            status_table.add_row(
                 'sweeps',
                 '{}/{}'.format(self._context.completed, self._context.total)
             )
 
-        table.add_row('elapsed', _format_seconds(elapsed))
-        table.add_row('remaining', _format_remaining(
+        status_table.add_row('elapsed', _format_seconds(elapsed))
+        status_table.add_row('remaining', _format_remaining(
             elapsed,
             snap['completed'],
             snap['total']
@@ -244,13 +255,33 @@ class RichProgressHandler:
         items = []
         if self._sweep_progress is not None:
             items.append(self._sweep_progress)
-        items.extend([self._progress, table])
+        items.append(self._progress)
+        if self._context is None:
+            items.append(status_table)
+        else:
+            items.append(Columns(
+                [status_table, self._sweep_residual_table()],
+                equal=True,
+                expand=True
+            ))
 
         return Panel(
             Group(*items),
             title='pyBaram simulation',
             border_style='blue'
         )
+
+    def _sweep_residual_table(self):
+        from rich.table import Table
+
+        table = Table(title='Sweep residuals', expand=True)
+        table.add_column('AOA', style='cyan', no_wrap=True)
+        table.add_column('Residual')
+
+        for aoa, residual in self._context.rows:
+            table.add_row(aoa, residual)
+
+        return table
 
 
 def _time_total(intg):
@@ -314,6 +345,17 @@ def _steady_residual(intg):
         return '{} = {}'.format(name, _format_float(resid[idx]))
     except (AttributeError, IndexError, TypeError, ZeroDivisionError):
         return None
+
+
+def _case_residual(intg):
+    residual = _steady_residual(intg)
+    if residual is not None:
+        return residual
+
+    if hasattr(intg, 'subres'):
+        return 'subres = {}'.format(_format_float(intg.subres))
+
+    return None
 
 
 def _format_float(value):
