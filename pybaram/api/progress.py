@@ -230,7 +230,6 @@ class RichProgressHandler:
         )
 
     def _render(self, intg):
-        from rich.columns import Columns
         from rich.console import Group
         from rich.panel import Panel
         from rich.table import Table
@@ -262,24 +261,25 @@ class RichProgressHandler:
             snap['total']
         ))
 
-        items = []
-        if self._sweep_progress is not None:
-            items.append(self._sweep_progress)
-        items.append(self._progress)
         if self._context is None:
-            items.append(status_table)
+            items = [self._progress, status_table]
+            content = Group(*items)
         else:
-            items.append(Columns(
-                [status_table, self._sweep_residual_table()],
-                equal=True,
-                expand=True
-            ))
+            left_items = []
+            if self._sweep_progress is not None:
+                left_items.append(self._sweep_progress)
+            left_items.append(self._progress)
+            left_items.append(status_table)
+            content = self._sweep_layout(Group(*left_items))
 
         return Panel(
-            Group(*items),
+            content,
             title='pyBaram simulation',
             border_style='blue'
         )
+
+    def _sweep_layout(self, status_area):
+        return _HalfSplit(status_area, self._sweep_residual_table())
 
     def _sweep_residual_table(self):
         from rich.console import Group
@@ -295,6 +295,49 @@ class RichProgressHandler:
             table.add_row(aoa, residual)
 
         return Group(Text('Sweep residuals', style='bold'), table)
+
+
+class _HalfSplit:
+    def __init__(self, left, right):
+        self._left = left
+        self._right = right
+
+    def __rich_console__(self, console, options):
+        from rich.segment import Segment
+
+        left_width, right_width = _split_widths(options.max_width)
+        left_options = options.update(
+            width=left_width,
+            min_width=left_width,
+            max_width=left_width
+        )
+        right_options = options.update(
+            width=right_width,
+            min_width=right_width,
+            max_width=right_width
+        )
+        left_lines = console.render_lines(self._left, left_options, pad=True)
+        right_lines = console.render_lines(self._right, right_options, pad=True)
+        height = max(len(left_lines), len(right_lines))
+
+        for i in range(height):
+            left_line = left_lines[i] if i < len(left_lines) else []
+            right_line = right_lines[i] if i < len(right_lines) else []
+            line = (
+                Segment.adjust_line_length(left_line, left_width) +
+                Segment.adjust_line_length(right_line, right_width)
+            )
+
+            for segment in line:
+                yield segment
+
+            if i + 1 < height:
+                yield Segment.line()
+
+
+def _split_widths(width):
+    left_width = width // 2
+    return left_width, width - left_width
 
 
 class _SweepKeyReader:

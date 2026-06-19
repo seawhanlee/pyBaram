@@ -6,7 +6,10 @@ from contextlib import redirect_stdout
 
 from pybaram.api.progress import (
     NullProgressHandler,
+    RichProgressHandler,
+    _HalfSplit,
     _format_remaining,
+    _split_widths,
     add_progress_handler,
     progress_snapshot
 )
@@ -147,6 +150,51 @@ class FinalStatusOutputTest(unittest.TestCase):
             intg.print_res([1e-10])
 
         self.assertEqual(out.getvalue(), '')
+
+
+class SweepTUILayoutTest(unittest.TestCase):
+    def test_half_split_splits_width_exactly(self):
+        self.assertEqual(_split_widths(80), (40, 40))
+        self.assertEqual(_split_widths(81), (40, 41))
+
+    def test_half_split_renders_each_side_at_fixed_half_width(self):
+        try:
+            from rich.console import Console
+        except ImportError:
+            self.skipTest('rich is not installed')
+
+        class WidthRecorder:
+            def __init__(self, text):
+                self.text = text
+                self.widths = []
+
+            def __rich_console__(self, console, options):
+                self.widths.append(options.max_width)
+                yield self.text
+
+        left = WidthRecorder('status')
+        right = WidthRecorder('residual')
+        console = Console(width=81, force_terminal=True)
+
+        console.render_lines(
+            _HalfSplit(left, right),
+            console.options.update(width=81, max_width=81),
+            pad=True
+        )
+
+        self.assertEqual(left.widths, [40])
+        self.assertEqual(right.widths, [41])
+
+    def test_sweep_layout_uses_half_split(self):
+        class Context:
+            rows = [('0', 'pending')]
+
+        handler = RichProgressHandler.__new__(RichProgressHandler)
+        handler._context = Context()
+
+        grid = handler._sweep_layout('left status area')
+
+        self.assertIsInstance(grid, _HalfSplit)
 
 
 if __name__ == '__main__':
