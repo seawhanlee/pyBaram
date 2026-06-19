@@ -17,6 +17,40 @@ Overview
 ---------
 pyBaram is an open-source, Python-based software designed to solve compressible flows using the finite volume method on unstructured grids. 'Baram' translates to 'Wind' in Korean. The software supports the simulation of compressible inviscid, laminar, and turbulent flows based on the Reynolds-averaged Navier-Stokes (RANS) models. All the code is written in Python, and hybrid parallel simulations are implemented using high-performance Python packages.
 
+Terminal UI
+-----------
+This fork adds an optional terminal UI for monitoring simulations. The default
+progress display is still `tqdm`, so existing commands continue to work without
+changes.
+
+Use the Rich-based terminal dashboard with `--ui tui`:
+
+```bash
+pybaram run mesh.pbrm config.ini --ui tui
+```
+
+For restarted simulations:
+
+```bash
+pybaram restart mesh.pbrm solution.pbrs --ui tui
+```
+
+Available progress modes are:
+
+- `tqdm`: default progress bar
+- `tui`: Rich terminal dashboard with progress, iteration/time, residual, CFL,
+  and related solver status where available
+- `none`: disable progress output, useful for batch jobs and log files
+
+For non-interactive execution, use:
+
+```bash
+pybaram run mesh.pbrm config.ini --ui none
+```
+
+The TUI requires the `rich` Python package, which is included in this fork's
+runtime dependencies. In MPI runs, only rank 0 renders the progress display.
+
 Examples
 ---------
 Examples of using pyBaram are available in the examples directory. Currently available examples includes:
