@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from argparse import ArgumentParser, FileType
+from argparse import ArgumentParser
 
 
 def process_import(args):
@@ -31,7 +31,7 @@ def process_run(args):
     mesh = NativeReader(args.mesh)
     cfg = INIFile(args.ini)
 
-    run(mesh, cfg)
+    run(mesh, cfg, ui=args.ui)
 
 
 def process_restart(args):
@@ -49,10 +49,10 @@ def process_restart(args):
         cfg = INIFile()
         cfg.fromstr(soln['config'])
 
-    restart(mesh, soln, cfg)
+    restart(mesh, soln, cfg, ui=args.ui)
 
 
-def main():
+def build_parser():
     ap = ArgumentParser(prog='pybaram')
     sp = ap.add_subparsers(dest='cmd', help='sub-command help')
 
@@ -79,6 +79,12 @@ def main():
     ap_run = sp.add_parser('run', help='run --help')
     ap_run.add_argument('mesh', type=str, help='mesh file')
     ap_run.add_argument('ini', type=str, help='config file')
+    ap_run.add_argument(
+        '--ui',
+        choices=('tqdm', 'tui', 'none'),
+        default='tqdm',
+        help='progress display mode'
+    )
     ap_run.set_defaults(process=process_run)
 
     # Run restart
@@ -86,6 +92,12 @@ def main():
     ap_restart.add_argument('mesh', type=str, help='mesh file')
     ap_restart.add_argument('soln', type=str, help='solution file')
     ap_restart.add_argument('ini', nargs='?', type=str, help='config file')
+    ap_restart.add_argument(
+        '--ui',
+        choices=('tqdm', 'tui', 'none'),
+        default='tqdm',
+        help='progress display mode'
+    )
     ap_restart.set_defaults(process=process_restart)
 
     # Export command
@@ -108,8 +120,14 @@ def main():
         help="List available surface names in mesh"
     )
 
+    return ap
+
+
+def main(argv=None):
+    ap = build_parser()
+
     # Parse the arguments
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     # Invoke the process method
     if hasattr(args, 'process'):

@@ -53,6 +53,7 @@ pyBaram |version| requires Python 3.9+ and following python packages.
 4. `h5py` >= 2.6
 5. `mpi4py` >= 2.0
 6. `tqdm` >= 4.0
+7. `rich` >= 13.0
 
 The ``scipy`` package is a required dependency and is used for numerical utilities and sparse matrix operations. Mesh reordering using the reverse Cuthill-McKee algorithm is applied by default.
 

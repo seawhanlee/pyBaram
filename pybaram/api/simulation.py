@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
 from pybaram.backends import get_backend
 from pybaram.integrators import get_integrator
+from pybaram.api.progress import add_progress_handler
 from pybaram.utils.mpi import mpi_init
 
-from tqdm import tqdm
 
-
-def run(mesh, cfg, be='none', comm='none'):
+def run(mesh, cfg, be='none', comm='none', ui='tqdm'):
     """
     Fresh run from mesh and configuration files.
 
@@ -18,12 +17,14 @@ def run(mesh, cfg, be='none', comm='none'):
     :type be: Backend
     :param comm: mpi4py comm object
     :type comm: MPI communicator
+    :param ui: progress display mode: 'tqdm', 'tui', or 'none'
+    :type ui: str
     """
     # Run common
-    _common(mesh, None, cfg, be, comm)
+    _common(mesh, None, cfg, be, comm, ui)
 
 
-def restart(mesh, soln, cfg, be='none', comm='none'):
+def restart(mesh, soln, cfg, be='none', comm='none', ui='tqdm'):
     """
     Restarted run from mesh and configuration files.
 
@@ -38,16 +39,18 @@ def restart(mesh, soln, cfg, be='none', comm='none'):
     :type be: Backend
     :param comm: mpi4py comm object
     :type comm: MPI communicator
+    :param ui: progress display mode: 'tqdm', 'tui', or 'none'
+    :type ui: str
     """
     # Check mesh and solution file
     if mesh['mesh_uuid'] != soln['mesh_uuid']:
         raise RuntimeError('Solution is not computed by the mesh')
 
     # Run common
-    _common(mesh, soln, cfg, be, comm)
+    _common(mesh, soln, cfg, be, comm, ui)
 
 
-def _common(msh, soln, cfg, backend, comm):
+def _common(msh, soln, cfg, backend, comm, ui):
     if comm == 'none':        
         # Initiate MPI comm world
         comm = mpi_init()
@@ -59,25 +62,11 @@ def _common(msh, soln, cfg, backend, comm):
     # Get integrator
     integrator = get_integrator(backend, cfg, msh, soln, comm)
 
-    # Add progress bar
-    if comm.rank == 0:
-        if integrator.mode in ('unsteady', 'unsteady-dts'):
-            tend = getattr(integrator, 'tend', integrator.tlist[-1])
-            pb = tqdm(
-                total=tend, initial=integrator.tcurr,
-                unit_scale=True)
+    # Add progress display
+    progress = add_progress_handler(integrator, comm, ui)
 
-            tprev = [integrator.tcurr]
-
-            def callb(intg):
-                dt = min(intg.tcurr, tend) - tprev[0]
-                tprev[0] = intg.tcurr
-                return pb.update(max(dt, 0.0))
-        else:
-            pb = tqdm(total=integrator.itermax, initial=integrator.iter)
-
-            def callb(intg): return pb.update(1)
-
-        integrator.completed_handler.append(callb)
-
-    integrator.run()
+    try:
+        progress.start()
+        integrator.run()
+    finally:
+        progress.stop()

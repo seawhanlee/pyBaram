@@ -19,6 +19,7 @@ dependencies = [
     'numpy >= 1.10',
     'numba >= 0.5',
     'tqdm >= 4.0',
+    'rich >= 13.0',
     'scipy >= 1.6',
 ]
 dynamic = ["version"]

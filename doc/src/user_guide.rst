@@ -51,6 +51,12 @@ When you run ``pybaram``, following help output is given::
         
         user@Computer ~/pyBaram$ pybaram run mesh.pbrm conf.ini
 
+   The progress display can be selected with ``--ui``. Available modes are
+   ``tqdm`` (default), ``tui`` for an interactive terminal dashboard, and
+   ``none`` for batch logs::
+
+        user@Computer ~/pyBaram$ pybaram run mesh.pbrm conf.ini --ui tui
+
    If you would like to conduct MPI parallel computation, please use ``mpirun -n <cores>`` to launch ``pybaram`` script. 
    Note that the mesh file should be partitioned by the same number of cores.
 
@@ -64,6 +70,10 @@ When you run ``pybaram``, following help output is given::
    Example::
         
         user@Computer ~/pyBaram$ pybaram restart mesh.pbrm sol-100.pbrs
+
+   The same progress display option is available for restarted runs::
+
+        user@Computer ~/pyBaram$ pybaram restart mesh.pbrm sol-100.pbrs --ui none
 
 5. ``pybaram export`` --- Convert solution files to `VTK <https://vtk.org/>`_ unstructured grid file (``.vtu``) 
    or `Tecplot <https://www.tecplot.com/>`_ data file (``.plt``). In addition to volume export, this command can
