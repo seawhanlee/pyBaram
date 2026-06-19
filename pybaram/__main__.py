@@ -52,6 +52,24 @@ def process_restart(args):
     restart(mesh, soln, cfg, ui=args.ui)
 
 
+def process_sweep(args):
+    from pybaram.api.sweep import (
+        parse_sweep_range,
+        parse_sweep_values,
+        run_aoa_sweep
+    )
+
+    if args.aoa:
+        aoas = parse_sweep_values(args.aoa)
+    else:
+        aoas = parse_sweep_range(*args.aoa_range)
+
+    run_aoa_sweep(
+        args.mesh, args.ini, aoas, args.out, args.ui,
+        overwrite=args.overwrite
+    )
+
+
 def build_parser():
     ap = ArgumentParser(prog='pybaram')
     sp = ap.add_subparsers(dest='cmd', help='sub-command help')
@@ -99,6 +117,40 @@ def build_parser():
         help='progress display mode'
     )
     ap_restart.set_defaults(process=process_restart)
+
+    # AOA sweep command
+    ap_sweep = sp.add_parser('sweep', help='sweep --help')
+    ap_sweep.add_argument('mesh', type=str, help='mesh file')
+    ap_sweep.add_argument('ini', type=str, help='base config file')
+    sweep_values = ap_sweep.add_mutually_exclusive_group(required=True)
+    sweep_values.add_argument(
+        '--aoa',
+        type=str,
+        help='comma-separated AOA values in degrees, e.g. 0,2,4'
+    )
+    sweep_values.add_argument(
+        '--aoa-range',
+        nargs=3,
+        metavar=('START', 'STOP', 'STEP'),
+        help='AOA range in degrees, inclusive of STOP when it lands on STEP'
+    )
+    ap_sweep.add_argument(
+        '-o', '--out',
+        default='sweep-aoa',
+        help='output directory for sweep cases'
+    )
+    ap_sweep.add_argument(
+        '--ui',
+        choices=('tqdm', 'tui', 'none'),
+        default='none',
+        help='progress display mode for each sweep case'
+    )
+    ap_sweep.add_argument(
+        '--overwrite',
+        action='store_true',
+        help='replace existing non-empty sweep case directories'
+    )
+    ap_sweep.set_defaults(process=process_sweep)
 
     # Export command
     ap_export = sp.add_parser('export', help='export --help')

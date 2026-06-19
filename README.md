@@ -51,6 +51,47 @@ pybaram run mesh.pbrm config.ini --ui none
 The TUI requires the `rich` Python package, which is included in this fork's
 runtime dependencies. In MPI runs, only rank 0 renders the progress display.
 
+AOA Sweep
+---------
+This fork adds an AOA sweep command for running the same mesh and base
+configuration across multiple angles of attack. The command modifies
+`[constants] aoa` for each case, so existing expressions such as
+`u = uf*cos(aoa/180*pi)` and force-direction definitions automatically update.
+
+Run explicit AOA values:
+
+```bash
+pybaram sweep mesh.pbrm config.ini --aoa 0,2,4
+```
+
+Run an inclusive range:
+
+```bash
+pybaram sweep mesh.pbrm config.ini --aoa-range -2 6 2
+```
+
+By default, sweep results are written under `sweep-aoa/`, with one directory per
+AOA value. Positive values use names such as `sweep-aoa/aoa1/` and
+`sweep-aoa/aoa2/`; negative values use names such as `sweep-aoa/aoan1/` and
+`sweep-aoa/aoan2/`. Each case directory contains the resolved `config.ini` used
+for that run and the normal pyBaram output files. A
+`sweep-aoa/sweep.csv` file summarizes the final row from each `force_*.csv`
+file so aerodynamic coefficient trends can be compared directly.
+
+Use a custom output directory or progress mode with:
+
+```bash
+pybaram sweep mesh.pbrm config.ini --aoa 0,2,4 --out aoa-study --ui tui
+```
+
+If a case directory already exists and is not empty, the sweep stops rather than
+appending to old CSV files. Use `--overwrite` only when you intentionally want
+to replace existing case directories:
+
+```bash
+pybaram sweep mesh.pbrm config.ini --aoa 0,2,4 --out aoa-study --overwrite
+```
+
 Examples
 ---------
 Examples of using pyBaram are available in the examples directory. Currently available examples includes:

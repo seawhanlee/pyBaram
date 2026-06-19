@@ -9,15 +9,16 @@ When you run ``pybaram``, following help output is given::
 
     user@Computer ~/pyBaram$ pybaram
 
-    usage: pybaram [-h] [--verbose] {import,partition,run,restart,export} ...
+    usage: pybaram [-h] [--verbose] {import,partition,run,restart,sweep,export} ...
 
     positional arguments:
-    {import,partition,run,restart,export}
+    {import,partition,run,restart,sweep,export}
                             sub-command help
         import              import --help
         partition           partition --help
         run                 run --help
         restart             run --help
+        sweep               sweep --help
         export              export --help
 
     optional arguments:
@@ -75,7 +76,37 @@ When you run ``pybaram``, following help output is given::
 
         user@Computer ~/pyBaram$ pybaram restart mesh.pbrm sol-100.pbrs --ui none
 
-5. ``pybaram export`` --- Convert solution files to `VTK <https://vtk.org/>`_ unstructured grid file (``.vtu``) 
+5. ``pybaram sweep`` --- Run an angle-of-attack sweep from one mesh and base
+   configuration file.
+
+   The sweep command modifies ``[constants] aoa`` for each case. Existing
+   configuration expressions that use ``aoa`` for free-stream velocity and
+   force directions are re-evaluated for each run.
+
+   Run explicit AOA values::
+
+        user@Computer ~/pyBaram$ pybaram sweep mesh.pbrm conf.ini --aoa 0,2,4
+
+   Run an inclusive range::
+
+        user@Computer ~/pyBaram$ pybaram sweep mesh.pbrm conf.ini --aoa-range -2 6 2
+
+   Sweep output is written to ``sweep-aoa`` by default. Each case gets its own
+   directory. Positive AOA values use directory names such as ``aoa1`` and
+   ``aoa2``; negative values use names such as ``aoan1`` and ``aoan2``.
+   The ``sweep-aoa/sweep.csv`` file summarizes the final row from each
+   ``force_*.csv`` file. Use ``--out`` to choose another directory and ``--ui``
+   to choose the per-case progress display::
+
+        user@Computer ~/pyBaram$ pybaram sweep mesh.pbrm conf.ini --aoa 0,2,4 --out aoa-study --ui tui
+
+   Existing non-empty case directories are rejected to avoid appending new
+   force and statistics rows to old CSV files. Use ``--overwrite`` only when
+   replacing previous sweep results is intended::
+
+        user@Computer ~/pyBaram$ pybaram sweep mesh.pbrm conf.ini --aoa 0,2,4 --out aoa-study --overwrite
+
+6. ``pybaram export`` --- Convert solution files to `VTK <https://vtk.org/>`_ unstructured grid file (``.vtu``) 
    or `Tecplot <https://www.tecplot.com/>`_ data file (``.plt``). In addition to volume export, this command can
    export solution data on a specified surface boundary and print the list of available surface names in the mesh.
    Volume export writes primitive variables and solver auxiliary variables, such as viscosity and wall distance

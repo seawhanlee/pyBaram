@@ -1,7 +1,12 @@
 # -*- coding: utf-8 -*-
 import unittest
 
-from pybaram.__main__ import build_parser, process_restart, process_run
+from pybaram.__main__ import (
+    build_parser,
+    process_restart,
+    process_run,
+    process_sweep
+)
 
 
 class CliParserTest(unittest.TestCase):
@@ -25,6 +30,30 @@ class CliParserTest(unittest.TestCase):
 
         self.assertEqual(args.ui, 'none')
         self.assertIs(args.process, process_restart)
+
+    def test_sweep_accepts_aoa_values(self):
+        args = build_parser().parse_args([
+            'sweep', 'mesh.pbrm', 'conf.ini', '--aoa', '0,2,4'
+        ])
+
+        self.assertEqual(args.aoa, '0,2,4')
+        self.assertEqual(args.ui, 'none')
+        self.assertEqual(args.out, 'sweep-aoa')
+        self.assertIs(args.process, process_sweep)
+
+    def test_sweep_accepts_aoa_range(self):
+        args = build_parser().parse_args([
+            'sweep', 'mesh.pbrm', 'conf.ini',
+            '--aoa-range', '0', '4', '2',
+            '--ui', 'tqdm',
+            '--out', 'runs',
+            '--overwrite'
+        ])
+
+        self.assertEqual(args.aoa_range, ['0', '4', '2'])
+        self.assertEqual(args.ui, 'tqdm')
+        self.assertEqual(args.out, 'runs')
+        self.assertTrue(args.overwrite)
 
 
 if __name__ == '__main__':
