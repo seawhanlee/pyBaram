@@ -3,6 +3,7 @@ import unittest
 
 from pybaram.api.progress import (
     NullProgressHandler,
+    _format_remaining,
     add_progress_handler,
     progress_snapshot
 )
@@ -113,6 +114,20 @@ class AddProgressHandlerTest(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             add_progress_handler(intg, FakeComm(0), 'bad-ui')
+
+
+class RemainingTimeTest(unittest.TestCase):
+    def test_remaining_time_is_estimated_from_progress(self):
+        self.assertEqual(_format_remaining(30, 25, 100), '1m 30s')
+
+    def test_remaining_time_is_zero_when_complete(self):
+        self.assertEqual(_format_remaining(30, 100, 100), '0s')
+
+    def test_remaining_time_is_estimating_without_progress(self):
+        self.assertEqual(_format_remaining(30, 0, 100), 'estimating')
+
+    def test_remaining_time_is_unknown_without_total(self):
+        self.assertEqual(_format_remaining(30, 0, 0), 'unknown')
 
 
 if __name__ == '__main__':

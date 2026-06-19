@@ -160,7 +160,8 @@ class RichProgressHandler:
         from rich.panel import Panel
         from rich.table import Table
 
-        rows = progress_snapshot(intg)['rows']
+        snap = progress_snapshot(intg)
+        rows = snap['rows']
 
         table = Table.grid(padding=(0, 2))
         table.add_column(style='cyan', no_wrap=True)
@@ -171,6 +172,11 @@ class RichProgressHandler:
 
         elapsed = perf_counter() - self._start_time
         table.add_row('elapsed', _format_seconds(elapsed))
+        table.add_row('remaining', _format_remaining(
+            elapsed,
+            snap['completed'],
+            snap['total']
+        ))
 
         return Panel(
             Group(self._progress, table),
@@ -260,3 +266,22 @@ def _format_seconds(seconds):
         return '{}m {}s'.format(minute, sec)
 
     return '{}s'.format(sec)
+
+
+def _format_remaining(elapsed, completed, total):
+    try:
+        elapsed = float(elapsed)
+        completed = float(completed)
+        total = float(total)
+    except (TypeError, ValueError):
+        return 'unknown'
+
+    if total <= 0:
+        return 'unknown'
+    if completed >= total:
+        return '0s'
+    if completed <= 0 or elapsed <= 0:
+        return 'estimating'
+
+    remaining = elapsed * (total - completed) / completed
+    return _format_seconds(remaining)
