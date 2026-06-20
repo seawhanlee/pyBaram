@@ -21,25 +21,26 @@ Installation
 ------------
 pyBaram requires Python 3.9 or newer. It depends on scientific Python packages
 including `numpy`, `scipy`, `numba`, `h5py`, `mpi4py`, `tqdm`, `rich`, and
-`textual`. On Linux, install the MPI development libraries before installing
-pyBaram so `mpi4py` can build or load correctly.
+`textual`.
 
-Recommended isolated environment:
+The recommended installation method is Conda because it can install Python,
+MPI, and the compiled scientific dependencies together in one environment:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
+conda create -n pybaram -c conda-forge \
+  python=3.11 numpy scipy numba h5py mpi4py tqdm rich textual pip
+conda activate pybaram
 ```
 
-Install the latest release wheel from this fork:
+Then install the latest pyBaram release wheel from this fork:
 
 ```bash
 python -m pip install \
   https://github.com/seawhanlee/pyBaram/releases/download/v0.10.0/pybaram-0.10.0-py3-none-any.whl
 ```
 
-Or install from a local checkout:
+If you prefer to work from a local checkout, create and activate the same Conda
+environment first, then install from source:
 
 ```bash
 git clone https://github.com/seawhanlee/pyBaram.git
@@ -47,11 +48,15 @@ cd pyBaram
 python -m pip install .
 ```
 
-For editable development installs:
+For editable development installs, use:
 
 ```bash
 python -m pip install -e .
 ```
+
+Pip-only virtual environments can work, but they require MPI development
+libraries to be installed separately before `mpi4py` can build or load
+correctly. Conda is the safer default for most users.
 
 Verify the command-line entry point:
 
