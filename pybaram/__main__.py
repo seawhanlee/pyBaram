@@ -71,6 +71,12 @@ def process_sweep(args):
     )
 
 
+def process_tui(args):
+    from pybaram.tui import PyBaramTUI
+
+    return PyBaramTUI().run()
+
+
 def build_parser():
     ap = ArgumentParser(prog='pybaram')
     sp = ap.add_subparsers(dest='cmd', help='sub-command help')
@@ -159,6 +165,10 @@ def build_parser():
     )
     ap_sweep.set_defaults(process=process_sweep)
 
+    # Full interactive TUI launcher
+    ap_tui = sp.add_parser('tui', help='tui --help')
+    ap_tui.set_defaults(process=process_tui)
+
     # Export command
     ap_export = sp.add_parser('export', help='export --help')
     ap_export.add_argument('mesh', help='mesh file')
@@ -190,9 +200,10 @@ def main(argv=None):
 
     # Invoke the process method
     if hasattr(args, 'process'):
-        args.process(args)
+        return args.process(args)
     else:
         ap.print_help()
+        return None
 
 
 if __name__ == '__main__':

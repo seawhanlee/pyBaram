@@ -19,9 +19,21 @@ pyBaram is an open-source, Python-based software designed to solve compressible 
 
 Terminal UI
 -----------
-This fork adds an optional terminal UI for monitoring simulations. The default
-progress display is still `tqdm`, so existing commands continue to work without
-changes.
+This fork adds a full terminal UI experience. Use the launcher when you want a
+guided workflow for pyBaram commands instead of memorizing CLI arguments:
+
+```bash
+pybaram tui
+```
+
+The launcher covers fresh runs, restarts, AOA sweeps, mesh import, mesh
+partitioning, and solution export. It validates input paths, previews the exact
+command it will run, and defaults simulation workflows to the Rich live
+dashboard.
+
+You can also opt into the live dashboard directly from normal commands. The
+default progress display is still `tqdm`, so existing commands continue to work
+without changes.
 
 Use the Rich-based terminal dashboard with `--ui tui`:
 
