@@ -17,6 +17,49 @@ Overview
 ---------
 pyBaram is an open-source, Python-based software designed to solve compressible flows using the finite volume method on unstructured grids. 'Baram' translates to 'Wind' in Korean. The software supports the simulation of compressible inviscid, laminar, and turbulent flows based on the Reynolds-averaged Navier-Stokes (RANS) models. All the code is written in Python, and hybrid parallel simulations are implemented using high-performance Python packages.
 
+Installation
+------------
+pyBaram requires Python 3.9 or newer. It depends on scientific Python packages
+including `numpy`, `scipy`, `numba`, `h5py`, `mpi4py`, `tqdm`, `rich`, and
+`textual`. On Linux, install the MPI development libraries before installing
+pyBaram so `mpi4py` can build or load correctly.
+
+Recommended isolated environment:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+```
+
+Install the latest release wheel from this fork:
+
+```bash
+python -m pip install \
+  https://github.com/seawhanlee/pyBaram/releases/download/v0.10.0/pybaram-0.10.0-py3-none-any.whl
+```
+
+Or install from a local checkout:
+
+```bash
+git clone https://github.com/seawhanlee/pyBaram.git
+cd pyBaram
+python -m pip install .
+```
+
+For editable development installs:
+
+```bash
+python -m pip install -e .
+```
+
+Verify the command-line entry point:
+
+```bash
+pybaram --help
+pybaram tui
+```
+
 Terminal UI
 -----------
 This fork adds a full-screen terminal UI experience. Use the launcher when you
