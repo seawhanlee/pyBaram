@@ -8,7 +8,7 @@ from pybaram.inifile import INIFile
 
 
 def run_aoa_sweep(meshf, inif, aoas, outdir='sweep-aoa', ui='tui',
-                  comm='none', overwrite=False):
+                  comm='none', overwrite=False, resume=False):
     from pybaram.api.simulation import run
     from pybaram.api.sweep_progress import SweepProgressContext
     from pybaram.readers.native import NativeReader
@@ -35,8 +35,12 @@ def run_aoa_sweep(meshf, inif, aoas, outdir='sweep-aoa', ui='tui',
 
         _run_aoa_case(
             meshf, inif, outdir, root, aoa, comm, overwrite,
-            summary_rows, run, NativeReader, ui, sweep_context
+            summary_rows, run, NativeReader, ui, sweep_context,
+            resume=resume
         )
+        if comm.rank == 0:
+            write_sweep_summary(os.path.join(outdir, 'sweep.csv'), summary_rows)
+
         stop_requested = _sync_stop_requested(comm, sweep_context)
         if stop_requested:
             break
@@ -47,20 +51,31 @@ def run_aoa_sweep(meshf, inif, aoas, outdir='sweep-aoa', ui='tui',
 
 def _run_aoa_case(meshf, inif, outdir, root, aoa, comm, overwrite,
                   summary_rows, run, NativeReader, ui='none',
-                  sweep_context=None):
+                  sweep_context=None, resume=False):
     case_name = aoa_case_name(aoa)
     case_dir = os.path.join(outdir, case_name)
 
     error = None
+    skipped = False
     if comm.rank == 0:
-        try:
-            prepare_case_dir(case_dir, overwrite)
-        except RuntimeError as exc:
-            error = str(exc)
+        if resume and _is_nonempty_dir(case_dir) and not overwrite:
+            skipped = True
+            append_case_summary(summary_rows, case_dir, aoa, 'skipped')
+        else:
+            try:
+                prepare_case_dir(case_dir, overwrite)
+            except RuntimeError as exc:
+                error = str(exc)
 
     error = comm.bcast(error, root=0)
     if error:
         raise RuntimeError(error)
+
+    skipped = comm.bcast(skipped, root=0)
+    if skipped:
+        if sweep_context is not None:
+            sweep_context.complete_case('skipped')
+        return
 
     comm.Barrier()
 
@@ -83,15 +98,7 @@ def _run_aoa_case(meshf, inif, outdir, root, aoa, comm, overwrite,
         os.chdir(root)
 
     if comm.rank == 0:
-        rows = collect_force_summary(case_dir, aoa)
-        if rows:
-            summary_rows.extend(rows)
-        else:
-            summary_rows.append({
-                'aoa': format_sweep_value(aoa),
-                'case': case_name,
-                'force_file': ''
-            })
+        append_case_summary(summary_rows, case_dir, aoa, 'complete')
 
 
 def _sync_stop_requested(comm, sweep_context):
@@ -167,6 +174,25 @@ def prepare_case_dir(case_dir, overwrite=False):
     os.makedirs(case_dir, exist_ok=True)
 
 
+def append_case_summary(summary_rows, case_dir, aoa, status):
+    rows = collect_force_summary(case_dir, aoa)
+    if rows:
+        for row in rows:
+            row['status'] = status
+        summary_rows.extend(rows)
+    else:
+        summary_rows.append({
+            'aoa': format_sweep_value(aoa),
+            'case': os.path.basename(case_dir),
+            'status': status,
+            'force_file': ''
+        })
+
+
+def _is_nonempty_dir(path):
+    return os.path.isdir(path) and bool(os.listdir(path))
+
+
 def format_sweep_value(value):
     return '{:.12g}'.format(float(value))
 
@@ -197,7 +223,7 @@ def collect_force_summary(case_dir, aoa):
 
 
 def write_sweep_summary(fname, rows):
-    fields = ['aoa', 'case', 'force_file']
+    fields = ['aoa', 'case', 'status', 'force_file']
     for row in rows:
         for key in row:
             if key not in fields:

@@ -7,6 +7,7 @@ import unittest
 from pybaram.api.sweep import (
     _run_aoa_case,
     _sync_stop_requested,
+    append_case_summary,
     aoa_case_name,
     collect_force_summary,
     parse_sweep_range,
@@ -101,6 +102,20 @@ class SweepSummaryTest(unittest.TestCase):
             self.assertEqual(rows[0]['status'], 'ok')
             self.assertEqual(rows[1]['cl_p'], '0.1')
 
+    def test_append_case_summary_marks_force_rows_with_status(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fname = os.path.join(tmp, 'force_airfoil.csv')
+            with open(fname, 'w', newline='') as outf:
+                writer = csv.writer(outf)
+                writer.writerow(['iter', 'cl_p'])
+                writer.writerow([10, 0.2])
+
+            rows = []
+            append_case_summary(rows, tmp, 1, 'skipped')
+
+            self.assertEqual(rows[0]['status'], 'skipped')
+            self.assertEqual(rows[0]['cl_p'], '0.2')
+
 
 class SweepCaseDirTest(unittest.TestCase):
     def test_prepare_case_dir_rejects_existing_nonempty_dir(self):
@@ -161,8 +176,54 @@ class SweepCaseDirTest(unittest.TestCase):
             self.assertEqual(calls[0][3], 'tui')
             self.assertTrue(calls[0][4])
             self.assertEqual(rows[0]['case'], 'aoa2')
+            self.assertEqual(rows[0]['status'], 'complete')
             self.assertEqual(rows[0]['cl_p'], '0.25')
             self.assertTrue(os.path.exists(os.path.join(tmp, 'aoa2', 'config.ini')))
+
+    def test_run_aoa_case_resume_skips_existing_nonempty_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            case_dir = os.path.join(tmp, 'aoa2')
+            os.makedirs(case_dir)
+            with open(os.path.join(case_dir, 'force_airfoil.csv'), 'w',
+                      newline='') as outf:
+                writer = csv.writer(outf)
+                writer.writerow(['iter', 'cl_p'])
+                writer.writerow([50, 0.35])
+
+            base_cfg = os.path.join(tmp, 'base.ini')
+            with open(base_cfg, 'w') as outf:
+                outf.write('[constants]\naoa = 0\n')
+
+            calls = []
+
+            class Context:
+                completed = False
+
+                def complete_case(self, residual=None):
+                    self.completed = residual
+
+            rows = []
+            context = Context()
+            _run_aoa_case(
+                os.path.join(tmp, 'mesh.pbrm'),
+                base_cfg,
+                tmp,
+                os.getcwd(),
+                2,
+                FakeComm(),
+                False,
+                rows,
+                lambda *args, **kwargs: calls.append((args, kwargs)),
+                FakeMesh,
+                'none',
+                context,
+                resume=True
+            )
+
+            self.assertEqual(calls, [])
+            self.assertEqual(context.completed, 'skipped')
+            self.assertEqual(rows[0]['status'], 'skipped')
+            self.assertEqual(rows[0]['cl_p'], '0.35')
 
 
 class SweepStopRequestTest(unittest.TestCase):

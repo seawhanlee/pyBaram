@@ -47,13 +47,22 @@ class CliParserTest(unittest.TestCase):
             '--aoa-range', '0', '4', '2',
             '--ui', 'tqdm',
             '--out', 'runs',
-            '--overwrite'
+            '--resume'
         ])
 
         self.assertEqual(args.aoa_range, ['0', '4', '2'])
         self.assertEqual(args.ui, 'tqdm')
         self.assertEqual(args.out, 'runs')
-        self.assertTrue(args.overwrite)
+        self.assertTrue(args.resume)
+
+    def test_sweep_rejects_resume_with_overwrite(self):
+        with self.assertRaises(SystemExit):
+            build_parser().parse_args([
+                'sweep', 'mesh.pbrm', 'conf.ini',
+                '--aoa', '0',
+                '--resume',
+                '--overwrite'
+            ])
 
 
 if __name__ == '__main__':

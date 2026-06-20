@@ -98,6 +98,14 @@ to replace existing case directories:
 pybaram sweep mesh.pbrm config.ini --aoa 0,2,4 --out aoa-study --overwrite
 ```
 
+Use `--resume` to continue a previous sweep without rerunning non-empty case
+directories. Existing cases are marked as `skipped` in `sweep.csv`, new cases
+are marked as `complete`, and the summary file is updated after each case:
+
+```bash
+pybaram sweep mesh.pbrm config.ini --aoa 0,2,4 --out aoa-study --resume
+```
+
 Examples
 ---------
 Examples of using pyBaram are available in the examples directory. Currently available examples includes:

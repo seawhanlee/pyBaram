@@ -16,3 +16,4 @@ dependencies:
   - sphinxcontrib-bibtex 
   - sphinx-togglebutton
   - tqdm
+  - rich

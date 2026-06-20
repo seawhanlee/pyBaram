@@ -66,7 +66,8 @@ def process_sweep(args):
 
     run_aoa_sweep(
         args.mesh, args.ini, aoas, args.out, args.ui,
-        overwrite=args.overwrite
+        overwrite=args.overwrite,
+        resume=args.resume
     )
 
 
@@ -145,10 +146,16 @@ def build_parser():
         default='tui',
         help='sweep progress display mode'
     )
-    ap_sweep.add_argument(
+    existing_case = ap_sweep.add_mutually_exclusive_group()
+    existing_case.add_argument(
         '--overwrite',
         action='store_true',
         help='replace existing non-empty sweep case directories'
+    )
+    existing_case.add_argument(
+        '--resume',
+        action='store_true',
+        help='skip existing non-empty sweep case directories and continue'
     )
     ap_sweep.set_defaults(process=process_sweep)
 

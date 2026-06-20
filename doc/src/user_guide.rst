@@ -113,6 +113,13 @@ When you run ``pybaram``, following help output is given::
 
         user@Computer ~/pyBaram$ pybaram sweep mesh.pbrm conf.ini --aoa 0,2,4 --out aoa-study --overwrite
 
+   Use ``--resume`` to continue a previous sweep without rerunning non-empty
+   case directories. Existing cases are marked as ``skipped`` in
+   ``sweep.csv``, new cases are marked as ``complete``, and the summary file is
+   updated after each case::
+
+        user@Computer ~/pyBaram$ pybaram sweep mesh.pbrm conf.ini --aoa 0,2,4 --out aoa-study --resume
+
 6. ``pybaram export`` --- Convert solution files to `VTK <https://vtk.org/>`_ unstructured grid file (``.vtu``) 
    or `Tecplot <https://www.tecplot.com/>`_ data file (``.plt``). In addition to volume export, this command can
    export solution data on a specified surface boundary and print the list of available surface names in the mesh.
