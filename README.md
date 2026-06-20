@@ -19,17 +19,34 @@ pyBaram is an open-source, Python-based software designed to solve compressible 
 
 Terminal UI
 -----------
-This fork adds a full terminal UI experience. Use the launcher when you want a
-guided workflow for pyBaram commands instead of memorizing CLI arguments:
+This fork adds a full-screen terminal UI experience. Use the launcher when you
+want a guided, keyboard-first workflow for pyBaram commands instead of
+memorizing CLI arguments:
 
 ```bash
 pybaram tui
 ```
 
-The launcher covers fresh runs, restarts, AOA sweeps, mesh import, mesh
-partitioning, and solution export. It validates input paths, previews the exact
-command it will run, and defaults simulation workflows to the Rich live
-dashboard.
+The launcher is built on Textual and opens persistent panes for:
+
+- the current working directory, so you always know where pyBaram is browsing;
+- a navigable local file list with typed filtering/search for path completion;
+- workflow and field selection for fresh runs, restarts, AOA sweeps, mesh import,
+  mesh partitioning, and solution export;
+- an exact command preview before execution;
+- a live output pane that streams command output from a subprocess boundary.
+
+Core shortcuts include `j`/`k` for file navigation, `Enter` to open a directory or
+assign the selected file to the active field, `Backspace` for the parent
+directory, `w` to cycle workflows, `f` to cycle fields, `c` to cycle choices
+(such as AOA values vs range), `r` to run the previewed command, `Tab` to move
+focus, and `q` to quit. The TUI intentionally does not
+edit solver `.ini` files, redesign solver behavior, create project databases, or
+act as a remote file manager.
+
+The TUI requires the `textual` Python package, which is included in this fork's
+runtime dependencies. If the package is unavailable, `pybaram tui` reports a
+clear missing-dependency message rather than failing with an import traceback.
 
 You can also opt into the live dashboard directly from normal commands. The
 default progress display is still `tqdm`, so existing commands continue to work
@@ -60,8 +77,7 @@ For non-interactive execution, use:
 pybaram run mesh.pbrm config.ini --ui none
 ```
 
-The TUI requires the `rich` Python package, which is included in this fork's
-runtime dependencies. In MPI runs, only rank 0 renders the progress display.
+In MPI runs, only rank 0 renders the progress display.
 
 AOA Sweep
 ---------
