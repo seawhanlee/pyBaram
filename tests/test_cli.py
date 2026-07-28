@@ -5,8 +5,7 @@ from pybaram.__main__ import (
     build_parser,
     process_restart,
     process_run,
-    process_sweep,
-    process_tui
+    process_sweep
 )
 
 
@@ -65,11 +64,9 @@ class CliParserTest(unittest.TestCase):
                 '--overwrite'
             ])
 
-    def test_tui_command_opens_launcher(self):
-        args = build_parser().parse_args(['tui'])
-
-        self.assertEqual(args.cmd, 'tui')
-        self.assertIs(args.process, process_tui)
+    def test_tui_launcher_is_not_available(self):
+        with self.assertRaises(SystemExit):
+            build_parser().parse_args(['tui'])
 
 
 if __name__ == '__main__':
