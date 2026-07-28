@@ -71,12 +71,6 @@ def process_sweep(args):
     )
 
 
-def process_tui(args):
-    from pybaram.tui import PyBaramTUI
-
-    return PyBaramTUI().run()
-
-
 def build_parser():
     ap = ArgumentParser(prog='pybaram')
     sp = ap.add_subparsers(dest='cmd', help='sub-command help')
@@ -164,10 +158,6 @@ def build_parser():
         help='skip existing non-empty sweep case directories and continue'
     )
     ap_sweep.set_defaults(process=process_sweep)
-
-    # Full interactive TUI launcher
-    ap_tui = sp.add_parser('tui', help='tui --help')
-    ap_tui.set_defaults(process=process_tui)
 
     # Export command
     ap_export = sp.add_parser('export', help='export --help')

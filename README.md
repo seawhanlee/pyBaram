@@ -20,15 +20,14 @@ pyBaram is an open-source, Python-based software designed to solve compressible 
 Installation
 ------------
 pyBaram requires Python 3.9 or newer. It depends on scientific Python packages
-including `numpy`, `scipy`, `numba`, `h5py`, `mpi4py`, `tqdm`, `rich`, and
-`textual`.
+including `numpy`, `scipy`, `numba`, `h5py`, `mpi4py`, `tqdm`, and `rich`.
 
 The recommended installation method is Conda because it can install Python,
 MPI, and the compiled scientific dependencies together in one environment:
 
 ```bash
 conda create -n pybaram -c conda-forge \
-  python=3.11 numpy scipy numba h5py mpi4py tqdm rich textual pip
+  python=3.11 numpy scipy numba h5py mpi4py tqdm rich pip
 conda activate pybaram
 ```
 
@@ -62,43 +61,13 @@ Verify the command-line entry point:
 
 ```bash
 pybaram --help
-pybaram tui
 ```
 
 Terminal UI
 -----------
-This fork adds a full-screen terminal UI experience. Use the launcher when you
-want a guided, keyboard-first workflow for pyBaram commands instead of
-memorizing CLI arguments:
-
-```bash
-pybaram tui
-```
-
-The launcher is built on Textual and opens persistent panes for:
-
-- the current working directory, so you always know where pyBaram is browsing;
-- a navigable local file list with typed filtering/search for path completion;
-- workflow and field selection for fresh runs, restarts, AOA sweeps, mesh import,
-  mesh partitioning, and solution export;
-- an exact command preview before execution;
-- a live output pane that streams command output from a subprocess boundary.
-
-Core shortcuts include `j`/`k` for file navigation, `Enter` to open a directory or
-assign the selected file to the active field, `Backspace` for the parent
-directory, `w` to cycle workflows, `f` to cycle fields, `c` to cycle choices
-(such as AOA values vs range), `r` to run the previewed command, `Tab` to move
-focus, and `q` to quit. The TUI intentionally does not
-edit solver `.ini` files, redesign solver behavior, create project databases, or
-act as a remote file manager.
-
-The TUI requires the `textual` Python package, which is included in this fork's
-runtime dependencies. If the package is unavailable, `pybaram tui` reports a
-clear missing-dependency message rather than failing with an import traceback.
-
-You can also opt into the live dashboard directly from normal commands. The
-default progress display is still `tqdm`, so existing commands continue to work
-without changes.
+This fork provides a Rich-based terminal dashboard for monitoring simulations.
+The default progress display is still `tqdm`, so existing commands continue to
+work without changes.
 
 Use the Rich-based terminal dashboard with `--ui tui`:
 
