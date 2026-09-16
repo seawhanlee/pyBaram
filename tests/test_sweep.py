@@ -169,11 +169,11 @@ class SweepCaseDirTest(unittest.TestCase):
                        suppress_final_status:
                     fake_run(mesh, cfg, comm, ui, suppress_final_status),
                 FakeMesh,
-                'tui',
+                'rich',
                 object()
             )
 
-            self.assertEqual(calls[0][3], 'tui')
+            self.assertEqual(calls[0][3], 'rich')
             self.assertTrue(calls[0][4])
             self.assertEqual(rows[0]['case'], 'aoa2')
             self.assertEqual(rows[0]['status'], 'complete')

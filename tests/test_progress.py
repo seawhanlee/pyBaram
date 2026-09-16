@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import io
 import unittest
+from unittest.mock import patch
 
 from contextlib import redirect_stdout
 
@@ -100,6 +101,13 @@ class ProgressSnapshotTest(unittest.TestCase):
 
 
 class AddProgressHandlerTest(unittest.TestCase):
+    def test_default_uses_rich(self):
+        intg = FakeIntegrator()
+        with patch('pybaram.api.progress.RichProgressHandler') as rich:
+            handler = add_progress_handler(intg, FakeComm(0))
+        self.assertIs(handler, rich.return_value)
+        self.assertEqual(intg.completed_handler, [handler])
+
     def test_none_ui_does_not_append_handler(self):
         intg = FakeIntegrator()
 
@@ -111,7 +119,7 @@ class AddProgressHandlerTest(unittest.TestCase):
     def test_non_root_rank_does_not_append_handler(self):
         intg = FakeIntegrator()
 
-        handler = add_progress_handler(intg, FakeComm(1), 'tqdm')
+        handler = add_progress_handler(intg, FakeComm(1), 'rich')
 
         self.assertIsInstance(handler, NullProgressHandler)
         self.assertEqual(intg.completed_handler, [])
@@ -137,6 +145,86 @@ class RemainingTimeTest(unittest.TestCase):
         self.assertEqual(_format_remaining(30, 0, 0), 'unknown')
 
 
+class RichOutputTest(unittest.TestCase):
+    def make_integrator(self, mode='steady'):
+        intg = FakeIntegrator()
+        intg.mode = mode
+        intg.iter = 3
+        intg.itermax = 10
+        intg.tcurr = 0.25
+        intg.tend = 1.0
+        intg.resid = FakeVector([0.5])
+        intg.resid0 = FakeVector([1.0])
+        intg._res_idx = 0
+        intg.conservars = ['rho']
+        return intg
+
+    def test_nonterminal_prints_final_status_once_for_each_mode(self):
+        from rich.console import Console
+
+        for mode in ('steady', 'unsteady', 'unsteady-dts'):
+            with self.subTest(mode=mode):
+                out = io.StringIO()
+                console = Console(file=out, force_terminal=False, width=120)
+                intg = self.make_integrator(mode)
+                with patch('rich.console.Console', return_value=console):
+                    handler = add_progress_handler(intg, FakeComm(0))
+                task = handler._progress.tasks[0]
+                self.assertEqual(task.completed, 3 if mode == 'steady' else 0.25)
+                handler.start()
+                intg.iter = 4
+                intg.tcurr = 0.5
+                handler(intg)
+                self.assertEqual(out.getvalue(), '')
+                handler.stop()
+                final = out.getvalue()
+                self.assertIn(mode, final)
+                self.assertIn('4/10' if mode == 'steady' else '0.5/1', final)
+                self.assertNotIn('\x1b', final)
+                handler.stop()
+                self.assertEqual(out.getvalue(), final)
+
+    def test_sweep_preserves_aoa_and_residual_in_final_output(self):
+        from rich.console import Console
+        from pybaram.api.sweep_progress import SweepProgressContext
+
+        out = io.StringIO()
+        context = SweepProgressContext([2, 4])
+        context.start_case(2, 0)
+        intg = self.make_integrator()
+        with patch('rich.console.Console', return_value=Console(
+                file=out, force_terminal=False, width=160)):
+            handler = add_progress_handler(intg, FakeComm(0), context=context)
+        handler.start()
+        handler(intg)
+        handler.complete_context(intg)
+        handler.stop()
+        self.assertEqual(context.completed, 1)
+        self.assertEqual(context.rows[0], ('2', 'rho = 0.5'))
+        for text in ('AOA sweep', 'current aoa', 'rho = 0.5', '1/2'):
+            self.assertIn(text, out.getvalue())
+        self.assertIsNone(handler._key_reader)
+
+    def test_terminal_updates_inline_and_cleans_up(self):
+        from rich.console import Console
+
+        out = io.StringIO()
+        intg = self.make_integrator()
+        with patch('rich.console.Console', return_value=Console(
+                file=out, force_terminal=True, width=100)):
+            handler = add_progress_handler(intg, FakeComm(0))
+        try:
+            handler.start()
+            intg.iter = 5
+            handler(intg)
+            handler._live.refresh()
+            self.assertIn('5/10', out.getvalue())
+        finally:
+            handler.stop()
+        self.assertFalse(handler._live.is_started)
+        self.assertNotIn('\x1b[?1049h', out.getvalue())
+
+
 class FinalStatusOutputTest(unittest.TestCase):
     def test_final_status_can_be_suppressed(self):
         intg = BaseSteadyIntegrator.__new__(BaseSteadyIntegrator)
@@ -152,7 +240,7 @@ class FinalStatusOutputTest(unittest.TestCase):
         self.assertEqual(out.getvalue(), '')
 
 
-class SweepTUILayoutTest(unittest.TestCase):
+class SweepCLILayoutTest(unittest.TestCase):
     def test_half_split_splits_width_exactly(self):
         self.assertEqual(_split_widths(80), (40, 40))
         self.assertEqual(_split_widths(81), (40, 41))

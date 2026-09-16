@@ -11,6 +11,18 @@ from pybaram.__main__ import (
 
 
 class CliParserTest(unittest.TestCase):
+    def test_all_simulations_default_to_rich_and_reject_legacy_ui(self):
+        for argv in (
+            ['run', 'mesh', 'config'],
+            ['restart', 'mesh', 'solution'],
+            ['sweep', 'mesh', 'config', '--aoa', '0,2'],
+        ):
+            with self.subTest(command=argv[0]):
+                self.assertEqual(build_parser().parse_args(argv).ui, 'rich')
+                for legacy in ('tui', 'tqdm'):
+                    with self.assertRaises(SystemExit):
+                        build_parser().parse_args(argv + ['--ui', legacy])
+
     def test_backend_and_ui_are_forwarded_together(self):
         for command, files, process in (
             ('run', ['mesh.pbrm', 'conf.ini'], process_run),
@@ -19,7 +31,7 @@ class CliParserTest(unittest.TestCase):
             for backend in ('cpu', 'cuda'):
                 with self.subTest(command=command, backend=backend):
                     args = build_parser().parse_args([
-                        command, *files, '--backend', backend, '--ui', 'tui'
+                        command, *files, '--backend', backend, '--ui', 'rich'
                     ])
                     with patch('pybaram.readers.native.NativeReader') as reader, \
                          patch('pybaram.inifile.INIFile') as config, \
@@ -29,7 +41,7 @@ class CliParserTest(unittest.TestCase):
                         if command == 'restart':
                             expected.append(reader.return_value)
                         expected.append(config.return_value)
-                        execute.assert_called_once_with(*expected, be=backend, ui='tui')
+                        execute.assert_called_once_with(*expected, be=backend, ui='rich')
 
     def test_cpu_remains_default_backend(self):
         for argv in (['run', 'mesh', 'config'], ['restart', 'mesh', 'solution']):
@@ -49,18 +61,18 @@ class CliParserTest(unittest.TestCase):
                         args.process(args)
                         execute.assert_called_once_with(*positional, coloring_method=method)
 
-    def test_run_ui_defaults_to_tqdm(self):
+    def test_run_ui_defaults_to_rich(self):
         args = build_parser().parse_args(['run', 'mesh.pbrm', 'conf.ini'])
 
-        self.assertEqual(args.ui, 'tqdm')
+        self.assertEqual(args.ui, 'rich')
         self.assertIs(args.process, process_run)
 
-    def test_run_accepts_tui(self):
+    def test_run_accepts_rich(self):
         args = build_parser().parse_args([
-            'run', 'mesh.pbrm', 'conf.ini', '--ui', 'tui'
+            'run', 'mesh.pbrm', 'conf.ini', '--ui', 'rich'
         ])
 
-        self.assertEqual(args.ui, 'tui')
+        self.assertEqual(args.ui, 'rich')
 
     def test_restart_accepts_none(self):
         args = build_parser().parse_args([
@@ -76,7 +88,7 @@ class CliParserTest(unittest.TestCase):
         ])
 
         self.assertEqual(args.aoa, '0,2,4')
-        self.assertEqual(args.ui, 'tui')
+        self.assertEqual(args.ui, 'rich')
         self.assertEqual(args.out, 'sweep-aoa')
         self.assertIs(args.process, process_sweep)
 
@@ -84,13 +96,13 @@ class CliParserTest(unittest.TestCase):
         args = build_parser().parse_args([
             'sweep', 'mesh.pbrm', 'conf.ini',
             '--aoa-range', '0', '4', '2',
-            '--ui', 'tqdm',
+            '--ui', 'rich',
             '--out', 'runs',
             '--resume'
         ])
 
         self.assertEqual(args.aoa_range, ['0', '4', '2'])
-        self.assertEqual(args.ui, 'tqdm')
+        self.assertEqual(args.ui, 'rich')
         self.assertEqual(args.out, 'runs')
         self.assertTrue(args.resume)
 

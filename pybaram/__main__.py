@@ -120,8 +120,8 @@ def build_parser():
     ap_run.add_argument('ini', type=str, help='config file')
     ap_run.add_argument(
         '--ui',
-        choices=('tqdm', 'tui', 'none'),
-        default='tqdm',
+        choices=('rich', 'none'),
+        default='rich',
         help='progress display mode'
     )
     ap_run.add_argument(
@@ -140,8 +140,8 @@ def build_parser():
     ap_restart.add_argument('ini', nargs='?', type=str, help='config file')
     ap_restart.add_argument(
         '--ui',
-        choices=('tqdm', 'tui', 'none'),
-        default='tqdm',
+        choices=('rich', 'none'),
+        default='rich',
         help='progress display mode'
     )
     ap_restart.add_argument(
@@ -176,8 +176,8 @@ def build_parser():
     )
     ap_sweep.add_argument(
         '--ui',
-        choices=('tqdm', 'tui', 'none'),
-        default='tui',
+        choices=('rich', 'none'),
+        default='rich',
         help='sweep progress display mode'
     )
     existing_case = ap_sweep.add_mutually_exclusive_group()

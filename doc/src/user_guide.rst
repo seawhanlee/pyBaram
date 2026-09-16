@@ -70,10 +70,14 @@ When you run ``pybaram``, following help output is given::
         user@Computer ~/pyBaram$ pybaram run mesh.pbrm conf.ini
 
    The progress display can be selected with ``--ui``. Available modes are
-   ``tqdm`` (default), ``tui`` for an interactive terminal dashboard, and
-   ``none`` for batch logs::
+   ``rich`` (default) for inline progress and ``none`` to disable progress::
 
-        user@Computer ~/pyBaram$ pybaram run mesh.pbrm conf.ini --ui tui
+        user@Computer ~/pyBaram$ pybaram run mesh.pbrm conf.ini --ui rich
+
+   Run, restart, sweep, and Python APIs default to Rich. Only MPI rank 0
+   displays progress. Non-terminal output prints the final status (per executed
+   AOA for sweeps), without live terminal control sequences. The old ``tui`` and
+   ``tqdm`` values are no longer accepted; use ``rich`` or omit the option.
 
    The CPU backend is used by default. Select the CUDA backend with ``-b cuda``
    (or ``--backend cuda``)::
@@ -96,7 +100,7 @@ When you run ``pybaram``, following help output is given::
 
    Progress display options are also available for restarted simulations::
 
-        user@Computer ~/pyBaram$ pybaram restart mesh.pbrm sol-100.pbrs --ui tui
+        user@Computer ~/pyBaram$ pybaram restart mesh.pbrm sol-100.pbrs --ui rich
 
    The backend can be selected in the same way as for a fresh run::
 
@@ -124,12 +128,12 @@ When you run ``pybaram``, following help output is given::
    ``force_*.csv`` file. Use ``--out`` to choose another directory and ``--ui``
    to choose the sweep progress display::
 
-        user@Computer ~/pyBaram$ pybaram sweep mesh.pbrm conf.ini --aoa 0,2,4 --out aoa-study --ui tui
+        user@Computer ~/pyBaram$ pybaram sweep mesh.pbrm conf.ini --aoa 0,2,4 --out aoa-study --ui rich
 
-   With ``--ui tui``, the sweep command adds a sweep progress bar above the
+   With ``--ui rich``, the sweep command adds a sweep progress bar above the
    normal solver progress display. It shows the number of completed AOA cases
    and the angle currently running while preserving realtime per-case solver
-   status. The right side of the TUI lists each target AOA and its
+   status. The right side of the CLI lists each target AOA and its
    latest/final residual so completed cases can be compared while the sweep
    continues.
 

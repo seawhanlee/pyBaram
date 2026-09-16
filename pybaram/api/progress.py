@@ -4,21 +4,17 @@ import sys
 from time import perf_counter
 
 
-_UI_CHOICES = {"tqdm", "tui", "none"}
+_UI_CHOICES = {"rich", "none"}
 
 
-def add_progress_handler(integrator, comm, ui="tqdm", context=None):
+def add_progress_handler(integrator, comm, ui="rich", context=None):
     if ui not in _UI_CHOICES:
         raise ValueError("Unknown progress UI {!r}".format(ui))
 
     if ui == "none" or getattr(comm, "rank", 0) != 0:
         return NullProgressHandler()
 
-    handler = (
-        RichProgressHandler(integrator, context)
-        if ui == "tui"
-        else TqdmProgressHandler(integrator, context)
-    )
+    handler = RichProgressHandler(integrator, context)
     integrator.completed_handler.append(handler)
 
     return handler
@@ -56,59 +52,10 @@ class NullProgressHandler:
         pass
 
 
-class TqdmProgressHandler:
-    def __init__(self, intg, context=None):
-        from tqdm import tqdm
-
-        self._context = context
-        snap = progress_snapshot(intg)
-        self._completed = snap["completed"]
-        self._bar = tqdm(
-            total=snap["total"],
-            initial=snap["completed"],
-            unit_scale=snap["mode"] in ("unsteady", "unsteady-dts"),
-            leave=context is None,
-        )
-
-    def start(self):
-        pass
-
-    def stop(self):
-        self._bar.close()
-
-    def complete_context(self, intg):
-        if self._context is not None:
-            self._context.complete_case(_case_residual(intg))
-            self._set_postfix()
-
-    def __call__(self, intg):
-        completed = progress_snapshot(intg)["completed"]
-        update = max(completed - self._completed, 0)
-        self._completed += update
-        self._bar.update(update)
-        self._set_postfix()
-
-    def _set_postfix(self):
-        if self._context is None:
-            return
-
-        self._bar.set_postfix(
-            aoa=self._context.current,
-            residual=self._current_context_residual(),
-            sweep="{}/{}".format(self._context.completed, self._context.total),
-        )
-
-    def _current_context_residual(self):
-        for aoa, residual in self._context.rows:
-            if aoa == self._context.current:
-                return residual
-
-        return ""
-
-
 class RichProgressHandler:
     def __init__(self, intg, context=None):
         self._context = context
+        self._integrator = intg
         self._started = False
         self._disabled = False
         self._key_reader = None
@@ -128,19 +75,16 @@ class RichProgressHandler:
         except ImportError:
             self._disabled = True
             self._message = (
-                "--ui tui requires the rich package; progress display disabled."
+                "--ui rich requires the rich package; progress display disabled."
             )
             return
 
         self._console = Console(stderr=True)
-        if not self._console.is_terminal:
-            self._disabled = True
-            self._message = (
-                "--ui tui requires an interactive terminal; progress display disabled."
-            )
-            return
-
-        self._key_reader = _SweepKeyReader(context) if context is not None else None
+        self._interactive = self._console.is_terminal
+        self._key_reader = (
+            _SweepKeyReader(context)
+            if context is not None and self._interactive else None
+        )
         snap = progress_snapshot(intg)
         self._sweep_progress = None
         self._sweep_task = None
@@ -182,7 +126,8 @@ class RichProgressHandler:
                 self._message = None
             return
 
-        self._live.start()
+        if self._interactive:
+            self._live.start()
         if self._key_reader is not None:
             self._key_reader.start()
         self._started = True
@@ -191,10 +136,14 @@ class RichProgressHandler:
         if self._key_reader is not None:
             self._key_reader.stop()
         if self._started:
-            self._live.stop()
+            if self._interactive:
+                self._live.stop()
+            else:
+                self._console.print(self._render(self._integrator))
             self._started = False
 
     def __call__(self, intg):
+        self._integrator = intg
         if self._disabled:
             return
 
@@ -208,6 +157,7 @@ class RichProgressHandler:
         self._live.update(self._render(intg))
 
     def complete_context(self, intg):
+        self._integrator = intg
         if self._disabled or self._context is None:
             return
 

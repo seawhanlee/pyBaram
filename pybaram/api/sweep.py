@@ -7,7 +7,7 @@ import shutil
 from pybaram.inifile import INIFile
 
 
-def run_aoa_sweep(meshf, inif, aoas, outdir='sweep-aoa', ui='tui',
+def run_aoa_sweep(meshf, inif, aoas, outdir='sweep-aoa', ui='rich',
                   comm='none', overwrite=False, resume=False):
     from pybaram.api.simulation import run
     from pybaram.api.sweep_progress import SweepProgressContext

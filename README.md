@@ -15,8 +15,8 @@ project context, refer to the upstream project and the paper listed below.
 
 Upstream synchronization
 ------------------------
-Fork version `0.11.0` incorporates upstream [v0.8.0](https://gitlab.com/aadl_inha/pyBaram/-/tags/v0.8.0)
-(commit `a423cfa68b5d4053c8e5fee605d2a54076b54daf`), preserving the Rich TUI,
+Fork version `0.12.0` incorporates upstream [v0.8.0](https://gitlab.com/aadl_inha/pyBaram/-/tags/v0.8.0)
+(commit `a423cfa68b5d4053c8e5fee605d2a54076b54daf`), preserving the Rich CLI,
 CLI progress options, and resumable AOA sweeps. New upstream features include
 the CUDA backend, solver improvements, and rank-ordered/colored mesh layouts.
 Use `--backend cpu` (default) or `--backend cuda` with `run` and `restart`;
@@ -30,14 +30,14 @@ pyBaram is an open-source, Python-based software designed to solve compressible 
 Installation
 ------------
 pyBaram requires Python 3.9 or newer. It depends on scientific Python packages
-including `numpy`, `scipy`, `numba`, `h5py`, `mpi4py`, `tqdm`, and `rich`.
+including `numpy`, `scipy`, `numba`, `h5py`, `mpi4py`, and `rich`.
 
 The recommended installation method is Conda because it can install Python,
 MPI, and the compiled scientific dependencies together in one environment:
 
 ```bash
 conda create -n pybaram -c conda-forge \
-  python=3.11 numpy scipy numba h5py mpi4py tqdm rich pip
+  python=3.11 numpy scipy numba h5py mpi4py rich pip
 conda activate pybaram
 ```
 
@@ -48,7 +48,7 @@ python -m pip install \
   https://github.com/seawhanlee/pyBaram/releases/download/v0.10.0/pybaram-0.10.0-py3-none-any.whl
 ```
 
-To use version `0.11.0` from this checkout, create and activate the same Conda
+To use version `0.12.0` from this checkout, create and activate the same Conda
 environment first, then install from source:
 
 ```bash
@@ -73,38 +73,31 @@ Verify the command-line entry point:
 pybaram --help
 ```
 
-Terminal UI
------------
-This fork provides a Rich-based terminal dashboard for monitoring simulations.
-The default progress display is still `tqdm`, so existing commands continue to
-work without changes.
-
-Use the Rich-based terminal dashboard with `--ui tui`:
+Progress display
+----------------
+All simulations use Rich progress output by default, including `run`, `restart`,
+`sweep`, Python API calls, and MPI execution. The display stays inline in the
+terminal; it does not open a full-screen interface.
 
 ```bash
-pybaram run mesh.pbrm config.ini --ui tui
-```
-
-For restarted simulations:
-
-```bash
-pybaram restart mesh.pbrm solution.pbrs --ui tui
+pybaram run mesh.pbrm config.ini
+pybaram restart mesh.pbrm solution.pbrs --ui rich
+mpirun -n 2 pybaram run partitioned-mesh.pbrm config.ini
 ```
 
 Available progress modes are:
 
-- `tqdm`: default progress bar
-- `tui`: Rich terminal dashboard with progress, iteration/time, residual, CFL,
-  and related solver status where available
-- `none`: disable progress output, useful for batch jobs and log files
+- `rich` (default): progress, iteration/time, residual, CFL, and available solver status
+- `none`: disable progress output
 
-For non-interactive execution, use:
+The former `tui` and `tqdm` option values are no longer accepted. Remove those
+options or replace them with `--ui rich`. Python APIs accept `ui="rich"` or
+`ui="none"` as well.
 
-```bash
-pybaram run mesh.pbrm config.ini --ui none
-```
-
-In MPI runs, only rank 0 renders the progress display.
+Only MPI rank 0 renders progress. Interactive terminals refresh live; redirected
+output and other non-terminal streams receive the final Rich status without
+terminal control sequences. Sweeps print a status at the end of each executed
+AOA case. Use `--ui none` to suppress this output.
 
 AOA Sweep
 ---------
@@ -136,13 +129,13 @@ file so aerodynamic coefficient trends can be compared directly.
 Use a custom output directory or progress mode with:
 
 ```bash
-pybaram sweep mesh.pbrm config.ini --aoa 0,2,4 --out aoa-study --ui tui
+pybaram sweep mesh.pbrm config.ini --aoa 0,2,4 --out aoa-study --ui rich
 ```
 
-For sweeps, `--ui tui` adds a sweep progress bar above the normal solver
+For sweeps, `--ui rich` adds a sweep progress bar above the normal solver
 progress display. It shows the number of completed AOA cases and the angle
 currently running while preserving realtime per-case solver status. The right
-side of the TUI lists each target AOA and its latest/final residual so completed
+side of the CLI lists each target AOA and its latest/final residual so completed
 cases can be compared while the sweep continues.
 
 If a case directory already exists and is not empty, the sweep stops rather than

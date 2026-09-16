@@ -5,6 +5,17 @@ from pybaram.api import simulation
 
 
 class SimulationProgressTest(unittest.TestCase):
+    def test_run_and_restart_default_to_rich(self):
+        mesh = soln = {'mesh_uuid': 'same'}
+        for command, args in ((simulation.run, (mesh, {})),
+                              (simulation.restart, (mesh, soln, {}))):
+            with self.subTest(command=command.__name__), \
+                 patch.object(simulation, 'get_integrator') as integrator, \
+                 patch.object(simulation, 'add_progress_handler') as handler:
+                comm = object()
+                command(*args, be=object(), comm=comm)
+                handler.assert_called_once_with(integrator.return_value, comm, 'rich', None)
+
     def test_backend_selection_preserves_progress_and_cleanup(self):
         for backend_name in ('cpu', 'cuda'):
             for failing in (False, True):
@@ -18,7 +29,7 @@ class SimulationProgressTest(unittest.TestCase):
                          patch.object(simulation, 'add_progress_handler', return_value=progress) as handler:
                         def run():
                             simulation.run(mesh, cfg, be=backend_name, comm=comm,
-                                           ui='tui', progress_context=context,
+                                           ui='rich', progress_context=context,
                                            suppress_final_status=True)
                         if failing:
                             with self.assertRaisesRegex(RuntimeError, 'solver failed'):
@@ -29,7 +40,7 @@ class SimulationProgressTest(unittest.TestCase):
                             progress.complete_context.assert_called_once_with(integrator)
                         factory.assert_called_once_with(backend_name, cfg, comm=comm)
                         get_intg.assert_called_once_with(backend, cfg, mesh, None, comm)
-                        handler.assert_called_once_with(integrator, comm, 'tui', context)
+                        handler.assert_called_once_with(integrator, comm, 'rich', context)
                         self.assertTrue(integrator._suppress_final_status)
                         progress.start.assert_called_once_with()
                         progress.stop.assert_called_once_with()

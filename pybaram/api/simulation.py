@@ -5,7 +5,7 @@ from pybaram.api.progress import add_progress_handler
 from pybaram.utils.mpi import mpi_init
 
 
-def run(mesh, cfg, be='none', comm='none', ui='tqdm', progress_context=None,
+def run(mesh, cfg, be='none', comm='none', ui='rich', progress_context=None,
         suppress_final_status=False):
     """
     Fresh run from mesh and configuration files.
@@ -18,7 +18,7 @@ def run(mesh, cfg, be='none', comm='none', ui='tqdm', progress_context=None,
     :type be: str or object
     :param comm: mpi4py communicator
     :type comm: object
-    :param ui: progress display mode: 'tqdm', 'tui', or 'none'
+    :param ui: progress display mode: 'rich' or 'none'
     :type ui: str
     """
     # Run common
@@ -28,7 +28,7 @@ def run(mesh, cfg, be='none', comm='none', ui='tqdm', progress_context=None,
     )
 
 
-def restart(mesh, soln, cfg, be='none', comm='none', ui='tqdm',
+def restart(mesh, soln, cfg, be='none', comm='none', ui='rich',
             progress_context=None, suppress_final_status=False):
     """
     Restarted run from mesh and configuration files.
@@ -44,7 +44,7 @@ def restart(mesh, soln, cfg, be='none', comm='none', ui='tqdm',
     :type be: str or object
     :param comm: mpi4py communicator
     :type comm: object
-    :param ui: progress display mode: 'tqdm', 'tui', or 'none'
+    :param ui: progress display mode: 'rich' or 'none'
     :type ui: str
     """
     # Check mesh and solution file

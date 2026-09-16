@@ -53,8 +53,7 @@ packages:
 3. `scipy` >= 1.6
 4. `h5py` >= 2.6
 5. `mpi4py` >= 2.0
-6. `tqdm` >= 4.0
-7. `rich` >= 13.0
+6. `rich` >= 13.0
 
 Optional Python packages
 ^^^^^^^^^^^^^^^^^^^^^^^^
