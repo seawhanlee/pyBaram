@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from pybaram.solvers.baseadvec import BaseAdvecIntInters, BaseAdvecBCInters, BaseAdvecMPIInters
-from pybaram.backends.types import Kernel
+from pybaram.backends.types import (
+    Kernel, NullKernel, MPIPackKernel, MPIUnpackKernel, MPISendKernel
+)
 from pybaram.utils.nb import dot
 
 import numpy as np
@@ -72,12 +74,17 @@ class BaseAdvecDiffIntInters(BaseAdvecIntInters):
 class BaseAdvecDiffMPIInters(BaseAdvecMPIInters):
     def construct_kernels(self, elemap):
         # Buffers
-        lhs = self.be.alloc_array((self.nvars, self.nfpts))
-        self._rhs = rhs = self.be.alloc_array((self.nvars, self.nfpts))
+        self.rawlhs = self.be.alloc_array((self.nvars, self.nfpts), pinned=True)
+        self.rawrhs = self.be.alloc_array((self.nvars, self.nfpts), pinned=True)
+
+        self.lhs = lhs = self.be.convert_array(self.rawlhs)
+        self._rhs = rhs = self.be.convert_array(self.rawrhs)
 
         # Gradient at face and buffer
-        self._gradf = gradf = self.be.alloc_array((self.ndims, self.nvars, self.nfpts))
-        grad_rhs = self.be.alloc_array((self.ndims, self.nvars, self.nfpts))
+        self.raw_gradf = self.be.alloc_array((self.ndims, self.nvars, self.nfpts), pinned=True)
+        self.raw_grad_rhs = self.be.alloc_array((self.ndims, self.nvars, self.nfpts), pinned=True)
+        self._gradf = gradf = self.be.convert_array(self.raw_gradf)
+        self.grad_rhs = grad_rhs = self.be.convert_array(self.raw_grad_rhs)
 
         # View of element array
         self._fpts = fpts = tuple(cell.fpts for cell in elemap.values())
@@ -95,13 +102,37 @@ class BaseAdvecDiffMPIInters(BaseAdvecMPIInters):
         )
 
         # Kernel for pack, send, receive
-        self.pack = Kernel(*self._make_pack(), lhs, fpts)
-        self.send, self.sreq = self._make_send(lhs)
-        self.recv, self.rreq = self._make_recv(rhs)
+        pack = Kernel(*self._make_pack(), lhs, fpts)
+        send, self.sreq = self._make_send(self.rawlhs)
+        self.send = MPISendKernel(self.be, send)
+        self.recv, self.rreq = self._make_recv(self.rawrhs)
 
-        self.pack_grad = Kernel(*self._make_pack_grad(), gradf, dfpts)
-        self.send_grad, self.sgreq = self._make_send(gradf)
-        self.recv_grad, self.rgreq = self._make_recv(grad_rhs)
+        pack_grad = Kernel(*self._make_pack_grad(), gradf, dfpts)
+        send_grad, self.sgreq = self._make_send(self.raw_gradf)
+        self.send_grad = MPISendKernel(self.be, send_grad)
+        self.recv_grad, self.rgreq = self._make_recv(self.raw_grad_rhs)
+
+        # Sync Host <-> Device
+        if self.be.name == 'cuda':
+            dtoh = Kernel(self.be.copy_array('d2h'), self.rawlhs, lhs)
+            htod = Kernel(self.be.copy_array('h2d'), rhs, self.rawrhs)
+            dtoh_grad = Kernel(self.be.copy_array('d2h'), self.raw_gradf, gradf)
+            htod_grad = Kernel(self.be.copy_array('h2d'), grad_rhs, self.raw_grad_rhs)
+        else:
+            dtoh = NullKernel()
+            htod = NullKernel()
+            dtoh_grad = NullKernel()
+            htod_grad = NullKernel()
+
+        self.pack = MPIPackKernel(self.be, pack, dtoh)
+        self.unpack = MPIUnpackKernel(self.be, htod)
+        self.pack_grad = MPIPackKernel(self.be, pack_grad, dtoh_grad)
+        self.unpack_grad = MPIUnpackKernel(self.be, htod_grad)
+
+        self.pre_send = NullKernel()
+        self.post_recv = self.unpack
+        self.pre_send_grad = NullKernel()
+        self.post_recv_grad = self.unpack_grad
 
     def _make_grad_at(self):
         nvars, ndims = self.nvars, self.ndims

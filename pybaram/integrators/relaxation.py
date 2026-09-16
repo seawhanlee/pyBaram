@@ -19,14 +19,20 @@ def get_relaxation(cfg, intg, sect, name=None, default='lu-sgs'):
 class BaseRelaxation:
     name = None
     impl_op = None
+    rank_layout_req = None
 
     def __init__(self, intg, cfg, sect):
         intg.impl_op = self.impl_op
+        intg.rank_layout_req = self.rank_layout_req
+        intg.rank_layout_name = self.name
         self._intg = intg
         self._cfg = cfg
 
         # Configuration section for options owned by the relaxation solver.
         self._sect = sect
+
+    def set_a0(self, a0):
+        self.a0 = a0
 
 
 class BaseLUSGSRelaxation(BaseRelaxation):
@@ -37,8 +43,9 @@ class BaseLUSGSRelaxation(BaseRelaxation):
 
         resid = intg.rhs_resid(0, 1, **kwargs)
 
-        intg.sys.eles.lusgs()
-        intg.sys.eles.update()
+        self.pack(self.a0)
+        self.lusgs()
+        self.update()
         intg.sys.post(0)
 
         return 0, resid
@@ -46,147 +53,254 @@ class BaseLUSGSRelaxation(BaseRelaxation):
 
 class LUSGSRelaxation(BaseLUSGSRelaxation):
     name = 'lu-sgs'
+    rank_layout_req = 'rank-order'
 
     def build(self, a0, kappa=1.01):
         from pybaram.integrators.lusgs import (
-            make_lusgs_common, make_lusgs_update, make_serial_lusgs
+            make_rank_lusgs_common, make_rank_lusgs_sweep,
+            make_rank_lusgs_update, make_lusgs_pack
         )
 
         intg = self._intg
         be = intg.be
         idx_u = intg._curr_idx
         idx_du = intg._rhs_idx
+        eles = list(intg.sys.eles)
+        self.a0 = a0
 
-        for ele in intg.sys.eles:
-            diag = ele.fpts[1, 0]
-            fnorm_vol, vec_fnorm = ele.fnorm_vol, ele.vec_fnorm
-            nei_ele = ele.nei_ele
+        nvars = eles[0].nvars
+        sys = intg.sys
+        cell_ids = sys.rank_cell_ids
+        nlocal = sys.rank_neles
 
-            def make_kernels(nv, flux, lambdaf, factor=1.0):
-                pre_lusgs = make_lusgs_common(
-                    ele, a0=a0, factor=factor, kappa=kappa
-                )
-                lsweep, usweep = make_serial_lusgs(be, ele, nv, flux)
+        # Rank-cell work arrays used by pack, sweep, and update kernels.
+        rank_u = be.alloc_array((nvars, nlocal))
+        rank_du = be.alloc_array((nvars, nlocal))
+        rank_diag = be.alloc_array((nvars, nlocal))
 
-                return (
-                    Kernel(
-                        *be.make_loop(ele.neles, pre_lusgs, fnorm_vol),
-                        ele.dt, diag, lambdaf
-                    ),
-                    Kernel(
-                        *be.make_loop(ele.neles, lsweep, fnorm_vol, vec_fnorm, nei_ele),
-                        ele.upts[idx_u], ele.upts[idx_du], diag, ele.dsrc, lambdaf
-                    ),
-                    Kernel(
-                        *be.make_loop(ele.neles, usweep, fnorm_vol, vec_fnorm, nei_ele),
-                        ele.upts[idx_u], ele.upts[idx_du], diag, ele.dsrc, lambdaf
-                    )
-                )
+        pack_kernels = []
+        update_kernels = []
 
-            pre_lusgs, lsweep, usweep = make_kernels(
-                (0, ele.nfvars), ele.flux_container(), ele.fspr
+        for ele in eles:
+            ele_cell_ids = be.convert_array(cell_ids[ele])
+
+            # Pack element-local solution data into rank-cell storage.
+            pack = make_lusgs_pack(
+                ele, turb_factor=getattr(intg, '_tcfl_fac', 1.0)
             )
-            kernels = [pre_lusgs, lsweep, usweep]
+            pack_kernels.append(Kernel(
+                *be.make_loop(ele.neles, pack, ele_cell_ids),
+                ele.upts[idx_u], ele.upts[idx_du], ele.dt, ele.dsrc,
+                rank_u, rank_du, rank_diag
+            ))
 
-            if intg._is_turb:
-                pre_tlusgs, tlsweep, tusweep = make_kernels(
-                    (ele.nfvars, ele.nvars),
-                    ele.tflux_container(),
-                    ele.tfspr,
-                    factor=intg._tcfl_fac
-                )
-                kernels += [pre_tlusgs, tlsweep, tusweep]
+            # Scatter the rank-cell correction back to element-local storage.
+            update = make_rank_lusgs_update(ele)
+            update_kernels.append(Kernel(
+                *be.make_loop(ele.neles, update, ele_cell_ids),
+                ele.upts[idx_u], rank_du
+            ))
 
-            ele.lusgs = MetaKernel(kernels)
+        pre_args = (
+            sys.rank_face_indptr, sys.rank_face_slots,
+            sys.rank_face_area, sys.rank_rcp_vol
+        )
+        sweep_args = (
+            sys.rank_face_indptr, sys.rank_face_slots,
+            sys.rank_face_sides, sys.rank_face_neighbors,
+            sys.rank_face_area, sys.rank_face_normal,
+            sys.rank_rcp_vol
+        )
 
-            update = make_lusgs_update(ele)
-            ele.update = Kernel(
-                *be.make_loop(ele.neles, update),
-                ele.upts[idx_u], ele.upts[idx_du]
+        def make_kernels(nv, flux, lambdaf):
+            # Build the diagonal preparation plus lower/upper rank sweeps.
+            pre = make_rank_lusgs_common(nv, kappa=kappa)
+            lower, upper = make_rank_lusgs_sweep(
+                be, nvars, nv, flux, kappa=kappa
             )
+
+            return [
+                Kernel(
+                    *be.make_loop(nlocal, pre, *pre_args),
+                    rank_diag, lambdaf
+                ),
+                Kernel(
+                    *be.make_loop(nlocal, lower, *sweep_args),
+                    rank_u, rank_du, rank_diag, lambdaf
+                ),
+                Kernel(
+                    *be.make_loop(nlocal, upper, *sweep_args),
+                    rank_u, rank_du, rank_diag, lambdaf
+                )
+            ]
+
+        # Flow variables use the shared rank face spectral radius.
+        kernels = make_kernels(
+            (0, eles[0].nfvars), eles[0].flux_container(),
+            sys.rank_fspr
+        )
+        if intg._is_turb:
+            # Turbulence variables use their own spectral radius storage.
+            kernels += make_kernels(
+                (eles[0].nfvars, nvars), eles[0].tflux_container(),
+                sys.rank_tfspr
+            )
+
+        self.rank_u = rank_u
+        self.rank_du = rank_du
+        self.rank_diag = rank_diag
+        self.pack = MetaKernel(pack_kernels)
+        self.lusgs = MetaKernel(kernels)
+        self.update = MetaKernel(update_kernels)
 
 
 class ColoredLUSGSRelaxation(BaseLUSGSRelaxation):
     name = 'colored-lu-sgs'
+    rank_layout_req = 'rank-coloring'
 
     def build(self, a0, kappa=1.01):
         from pybaram.integrators.lusgs import (
-            make_colored_lusgs, make_lusgs_common, make_lusgs_update
+            make_ele_colored_lusgs_sweep, make_ele_lusgs_common,
+            make_rank_lusgs_update, make_lusgs_pack
         )
 
         intg = self._intg
         be = intg.be
         idx_u = intg._curr_idx
         idx_du = intg._rhs_idx
+        sys = intg.sys
+        eles = list(sys.eles)
+        self.a0 = a0
 
-        for ele in intg.sys.eles:
-            ncolor, _icolor, _lev_color = ele.coloring()
-            icolor = be.convert_array(_icolor)
-            lev_color = be.convert_array(_lev_color)
+        nvars = eles[0].nvars
+        nlocal = sys.rank_neles
 
-            fnorm_vol = be.convert_array(ele.fnorm_vol)
-            vec_fnorm = be.convert_array(ele.vec_fnorm)
-            nei_ele = be.convert_array(ele.nei_ele)
-            diag = ele.fpts[1, 0]
+        # Rank-cell work arrays used by pack, colored sweep, and update
+        # kernels.
+        rank_u = be.alloc_array((nvars, nlocal))
+        rank_du = be.alloc_array((nvars, nlocal))
+        rank_diag = be.alloc_array((nvars, nlocal))
 
-            def make_kernels(nv, flux, lambdaf, factor=1.0):
-                pre_lusgs = make_lusgs_common(
-                    ele, a0=a0, factor=factor, kappa=kappa
-                )
-                lsweep, usweep = make_colored_lusgs(be, ele, nv, flux)
+        pack_kernels = []
+        update_kernels = []
+        for ele in eles:
+            cell_ids = sys.rank_ele_cell_ids[ele]
 
-                pre_lusgs = Kernel(
-                    *be.make_loop(ele.neles, pre_lusgs, fnorm_vol),
-                    ele.dt, diag, lambdaf
-                )
-
-                lsweeps = [
-                    Kernel(
-                        *be.make_loop(
-                            ne, lsweep, fnorm_vol, vec_fnorm, nei_ele,
-                            icolor, lev_color, n0=n0
-                        ),
-                        ele.upts[idx_u], ele.upts[idx_du], diag, ele.dsrc,
-                        lambdaf
-                    )
-                    for n0, ne in zip(ncolor[:-1], ncolor[1:])
-                ]
-
-                usweeps = [
-                    Kernel(
-                        *be.make_loop(
-                            ne, usweep, fnorm_vol, vec_fnorm, nei_ele,
-                            icolor, lev_color, n0=n0
-                        ),
-                        ele.upts[idx_u], ele.upts[idx_du], diag, ele.dsrc,
-                        lambdaf
-                    )
-                    for n0, ne in zip(ncolor[::-1][1:], ncolor[::-1][:-1])
-                ]
-
-                return pre_lusgs, lsweeps, usweeps
-
-            pre_lusgs, lsweeps, usweeps = make_kernels(
-                (0, ele.nfvars), ele.flux_container(), ele.fspr
+            # Pack element-local solution data into rank-cell storage.
+            pack = make_lusgs_pack(
+                ele, turb_factor=getattr(intg, '_tcfl_fac', 1.0)
             )
-            kernels = [pre_lusgs, *lsweeps, *usweeps]
+            pack_kernels.append(Kernel(
+                *be.make_loop(ele.neles, pack, cell_ids),
+                ele.upts[idx_u], ele.upts[idx_du], ele.dt, ele.dsrc,
+                rank_u, rank_du, rank_diag
+            ))
 
-            if intg._is_turb:
-                pre_tlusgs, tlsweeps, tusweeps = make_kernels(
-                    (ele.nfvars, ele.nvars),
-                    ele.tflux_container(),
-                    ele.tfspr,
-                    factor=intg._tcfl_fac
+            # Scatter the rank-cell correction back to element-local storage.
+            update = make_rank_lusgs_update(ele)
+            update_kernels.append(Kernel(
+                *be.make_loop(ele.neles, update, cell_ids),
+                ele.upts[idx_u], rank_du
+            ))
+
+        def make_kernels(nv, flux, lambdaf):
+            # Build element-local diagonal preparation kernels and colored
+            # lower/upper sweep kernels.
+            wave_factors = {
+                ele: be.alloc_array((ele.nface, ele.neles))
+                for ele in eles
+            }
+            pre_kernels = []
+            sweeps = {}
+            for ele in eles:
+                pre = make_ele_lusgs_common(
+                    ele, nv, kappa=kappa
                 )
-                kernels += [pre_tlusgs, *tlsweeps, *tusweeps]
+                pre_kernels.append(Kernel(
+                    *be.make_loop(
+                        ele.neles, pre,
+                        sys.rank_ele_cell_ids[ele],
+                        sys.rank_ele_face_refs[ele],
+                        sys.rank_ele_face_factors[ele]
+                    ),
+                    rank_diag, wave_factors[ele], lambdaf
+                ))
+                lower, upper = make_ele_colored_lusgs_sweep(
+                    be, ele, nvars, nv, flux
+                )
+                sweeps[ele] = {'lower': lower, 'upper': upper}
 
-            ele.lusgs = MetaKernel(kernels)
+            def make_color_kernels(color, direction):
+                kernels = []
+                for ele in eles:
+                    # Offsets select this rank color inside
+                    # rank_ele_color_order[ele].
+                    offsets = sys.rank_ele_color_offsets[ele]
+                    begin, end = offsets[color:color + 2]
+                    if begin == end:
+                        continue
 
-            update = make_lusgs_update(ele)
-            ele.update = Kernel(
-                *be.make_loop(ele.neles, update),
-                ele.upts[idx_u], ele.upts[idx_du]
+                    if direction == 'lower':
+                        neighbors = sys.rank_ele_lower_neighbors[ele]
+                    else:
+                        neighbors = sys.rank_ele_upper_neighbors[ele]
+
+                    sweep_args = (
+                        sys.rank_ele_color_order[ele],
+                        sys.rank_ele_cell_ids[ele], neighbors,
+                        sys.rank_ele_face_factors[ele],
+                        sys.rank_ele_face_normals[ele],
+                        wave_factors[ele]
+                    )
+                    kernels.append(Kernel(
+                        *be.make_loop(
+                            end, sweeps[ele][direction],
+                            *sweep_args, n0=begin
+                        ),
+                        rank_u, rank_du, rank_diag
+                    ))
+                return kernels
+
+            ncolors = sys.rank_ncolors
+            # Lower sweeps advance colors; upper sweeps walk them backward.
+            lower_kernels = [
+                kern
+                for color in range(ncolors)
+                for kern in make_color_kernels(color, 'lower')
+            ]
+            upper_kernels = [
+                kern
+                for color in range(ncolors - 1, -1, -1)
+                for kern in make_color_kernels(color, 'upper')
+            ]
+
+            return [
+                *pre_kernels, *lower_kernels, *upper_kernels
+            ], wave_factors
+
+        # Flow variables use the shared rank face spectral radius.
+        flow_kernels, flow_wave_factors = make_kernels(
+            (0, eles[0].nfvars), eles[0].flux_container(),
+            sys.rank_fspr
+        )
+        kernels = flow_kernels
+        if intg._is_turb:
+            # Turbulence variables use their own spectral radius storage.
+            turb_kernels, turb_wave_factors = make_kernels(
+                (eles[0].nfvars, nvars), eles[0].tflux_container(),
+                sys.rank_tfspr
             )
+            kernels += turb_kernels
+
+        self.rank_u = rank_u
+        self.rank_du = rank_du
+        self.rank_diag = rank_diag
+        self.flow_wave_factors = flow_wave_factors
+        if intg._is_turb:
+            self.turb_wave_factors = turb_wave_factors
+        self.pack = MetaKernel(pack_kernels)
+        self.lusgs = MetaKernel(kernels)
+        self.update = MetaKernel(update_kernels)
 
 
 class BaseBlockLUSGSRelaxation(BaseRelaxation):
@@ -198,42 +312,27 @@ class BaseBlockLUSGSRelaxation(BaseRelaxation):
         self.subrtol = self._cfg.getfloat(self._sect, 'sub-rtol', 0.1)
         self.subatol = self._cfg.getfloat(self._sect, 'sub-atol', 0.0)
 
-    def _make_update_kernels(self, ele, make_blusgs_update, make_sub_residual):
-        intg = self._intg
-        be = intg.be
-        idx_u = intg._curr_idx
-
-        update = make_blusgs_update(ele)
-        ele.update = Kernel(
-            *be.make_loop(ele.neles, update), ele.upts[idx_u], ele.du
-        )
-
-        subres = make_sub_residual(ele)
-        ele.subresid = Kernel(
-            *be.make_loop(ele.neles, subres), ele.vol, ele.du, ele.dup,
-            ele.resid_out
-        )
-
     def step(self, **kwargs):
         intg = self._intg
 
         resid = intg.rhs_resid(0, 1, **kwargs)
 
+        self.pack(self.a0)
+
         # Reset correction histories.
-        intg.sys.eles.du.set(0)
-        intg.sys.eles.dup.set(0)
+        self.reset()
 
         # Compute diagonal matrix
-        intg.sys.eles.pre_blusgs()
+        self.pre_blusgs()
         subresid = 1.0
 
         # Block LU-SGS subiterations.
         for it in range(self.subiter):
             # Block LU-SGS sweep
-            intg.sys.eles.blusgs_sweep()
+            self.blusgs_sweep()
 
             # Compute sub-residual from all elements
-            intg.sys.eles.subresid()
+            self.subresid()
             drho = intg.sys.reduce_residual()[intg._res_idx]
 
             # Check sub-convergence
@@ -247,7 +346,7 @@ class BaseBlockLUSGSRelaxation(BaseRelaxation):
                 if subresid < self.subrtol:
                     break
 
-        intg.sys.eles.update()
+        self.update()
         intg.sys.post(0)
         intg.subitnum = it + 1
         intg.subres = subresid
@@ -257,551 +356,652 @@ class BaseBlockLUSGSRelaxation(BaseRelaxation):
 
 class BlockLUSGSRelaxation(BaseBlockLUSGSRelaxation):
     name = 'blu-sgs'
+    rank_layout_req = 'rank-order'
 
     def build(self, a0):
         from pybaram.integrators.blusgs import (
-            make_blusgs_update, make_pre_blusgs, make_serial_blusgs,
-            make_sub_residual, make_tpre_blusgs
+            make_rank_blusgs_pack, make_rank_blusgs_sweep,
+            make_rank_blusgs_update, make_rank_pre_blusgs,
+            make_rank_sub_residual, make_rank_tblusgs_pack
         )
 
         intg = self._intg
         be = intg.be
 
         self._init_subiteration_controls()
+        self.a0 = a0
         idx_u = intg._curr_idx
         idx_rhs = intg._rhs_idx
+        sys = intg.sys
+        eles = list(sys.eles)
+        nlocal = sys.rank_neles
+        nvars = eles[0].nvars
+        nfvars = eles[0].nfvars
 
-        for ele in intg.sys.eles:
-            fnorm_vol = be.convert_array(ele.fnorm_vol)
-            nei_ele = be.convert_array(ele.nei_ele)
-            diag = be.alloc_array((ele.nfvars, ele.nfvars, ele.neles))
+        # Rank-cell work arrays for block RHS, correction, and subiteration
+        # residual history.
+        rank_rhs = be.alloc_array((nvars, nlocal))
+        rank_du = be.alloc_array((nvars, nlocal))
+        rank_dup = be.alloc_array((nvars, nlocal))
 
-            ele.du = ArrayBank(ele.fpts, 1)
-            ele.dup = ArrayBank(ele.fpts, 2)
+        # Flow diagonal blocks are stored in LU-factorized form after pre.
+        flow_diag = be.alloc_array((nfvars, nfvars, nlocal))
 
-            nv = (0, ele.nfvars)
-            pre_blusgs = make_pre_blusgs(be, ele, nv, a0=a0)
-            lower, upper = make_serial_blusgs(be, ele, nv)
+        pack_kernels = []
+        update_kernels = []
+        subresid_kernels = []
+        for ele in eles:
+            cell_ids = be.convert_array(sys.rank_cell_ids[ele])
 
-            pre_blusgs = Kernel(
-                *be.make_loop(ele.neles, pre_blusgs, fnorm_vol),
-                ele.dt, diag, ele.jmat
+            # Pack flow RHS and initialize flow diagonal blocks.
+            pack = make_rank_blusgs_pack(ele)
+            pack_kernels.append(Kernel(
+                *be.make_loop(ele.neles, pack, cell_ids),
+                ele.upts[idx_rhs], ele.dt, rank_rhs, flow_diag
+            ))
+
+            # Scatter the rank-cell correction back to element-local storage.
+            update = make_rank_blusgs_update(ele)
+            update_kernels.append(Kernel(
+                *be.make_loop(ele.neles, update, cell_ids),
+                ele.upts[idx_u], rank_du
+            ))
+
+            # Track correction changes for block LU-SGS sub-convergence.
+            subresid = make_rank_sub_residual(ele)
+            subresid_kernels.append(Kernel(
+                *be.make_loop(ele.neles, subresid, cell_ids),
+                ele.vol, rank_du, rank_dup, ele.resid_out
+            ))
+
+        face_args = (
+            sys.rank_face_indptr, sys.rank_face_slots,
+            sys.rank_face_sides, sys.rank_face_neighbors,
+            sys.rank_face_area, sys.rank_rcp_vol
+        )
+        pre_face_args = (
+            sys.rank_face_indptr, sys.rank_face_slots,
+            sys.rank_face_sides, sys.rank_face_area,
+            sys.rank_rcp_vol
+        )
+
+        # Assemble and factorize local diagonal blocks from face Jacobians.
+        pre_flow = make_rank_pre_blusgs(be, nfvars)
+        pre_kernels = [Kernel(
+            *be.make_loop(nlocal, pre_flow, *pre_face_args),
+            flow_diag, sys.rank_jmat
+        )]
+
+        # Flow lower/upper sweeps use the rank-order CSR face layout.
+        lower, upper = make_rank_blusgs_sweep(be, 0, nfvars)
+        sweep_kernels = [
+            Kernel(
+                *be.make_loop(nlocal, lower, *face_args),
+                rank_rhs, rank_du, flow_diag, sys.rank_jmat
+            ),
+            Kernel(
+                *be.make_loop(nlocal, upper, *face_args),
+                rank_rhs, rank_du, flow_diag, sys.rank_jmat
             )
-            lsweep = Kernel(
-                *be.make_loop(ele.neles, lower, fnorm_vol, nei_ele),
-                ele.upts[idx_rhs], ele.du, diag, ele.jmat
+        ]
+
+        if intg._is_turb:
+            nturbvars = nvars - nfvars
+
+            # Turbulence uses a separate block diagonal and source Jacobian.
+            turb_diag = be.alloc_array((nturbvars, nturbvars, nlocal))
+            for ele in eles:
+                cell_ids = be.convert_array(sys.rank_cell_ids[ele])
+                pack_turb = make_rank_tblusgs_pack(
+                    ele, ele.make_source_jacobian(),
+                    factor=intg._tcfl_fac
+                )
+                pack_kernels.append(Kernel(
+                    *be.make_loop(ele.neles, pack_turb, cell_ids),
+                    ele.upts[idx_u], ele.dt, ele.dsrc, turb_diag
+                ))
+
+            # Assemble and factorize turbulence diagonal blocks.
+            pre_turb = make_rank_pre_blusgs(
+                be, nturbvars
             )
-            usweep = Kernel(
-                *be.make_loop(ele.neles, upper, fnorm_vol, nei_ele),
-                ele.upts[idx_rhs], ele.du, diag, ele.jmat
+            pre_kernels.append(Kernel(
+                *be.make_loop(nlocal, pre_turb, *pre_face_args),
+                turb_diag, sys.rank_tjmat
+            ))
+
+            # Turbulence sweeps operate on the turbulence variable block.
+            tlower, tupper = make_rank_blusgs_sweep(
+                be, nfvars, nturbvars
             )
-
-            pre_kernels = [pre_blusgs]
-            sweep_kernels = [lsweep, usweep]
-
-            if intg._is_turb:
-                tdiag = be.alloc_array((ele.nturbvars, ele.nturbvars, ele.neles))
-                tnv = (ele.nfvars, ele.nvars)
-
-                srcjacobian = ele.make_source_jacobian()
-                pre_tblusgs = make_tpre_blusgs(
-                    be, ele, tnv, srcjacobian, intg._tcfl_fac, a0=a0
+            sweep_kernels += [
+                Kernel(
+                    *be.make_loop(nlocal, tlower, *face_args),
+                    rank_rhs, rank_du, turb_diag, sys.rank_tjmat
+                ),
+                Kernel(
+                    *be.make_loop(nlocal, tupper, *face_args),
+                    rank_rhs, rank_du, turb_diag, sys.rank_tjmat
                 )
-                pre_tblusgs = Kernel(
-                    *be.make_loop(ele.neles, pre_tblusgs, fnorm_vol),
-                    ele.upts[idx_u], ele.dt, tdiag, ele.tjmat, ele.dsrc
-                )
+            ]
 
-                tlower, tupper = make_serial_blusgs(be, ele, tnv)
-                tlsweep = Kernel(
-                    *be.make_loop(ele.neles, tlower, fnorm_vol, nei_ele),
-                    ele.upts[idx_rhs], ele.du, tdiag, ele.tjmat
-                )
-                tusweep = Kernel(
-                    *be.make_loop(ele.neles, tupper, fnorm_vol, nei_ele),
-                    ele.upts[idx_rhs], ele.du, tdiag, ele.tjmat
-                )
+        def reset():
+            # Start each block LU-SGS solve from a zero correction.
+            rank_du[:] = 0
+            rank_dup[:] = 0
 
-                pre_kernels += [pre_tblusgs]
-                sweep_kernels += [tlsweep, tusweep]
-
-            ele.pre_blusgs = MetaKernel(pre_kernels)
-            ele.blusgs_sweep = MetaKernel(sweep_kernels)
-
-            self._make_update_kernels(
-                ele, make_blusgs_update, make_sub_residual
-            )
+        # Keep reusable work arrays and kernel groups for step().
+        self.rank_rhs = rank_rhs
+        self.rank_du = rank_du
+        self.rank_dup = rank_dup
+        self.flow_diag = flow_diag
+        if intg._is_turb:
+            self.turb_diag = turb_diag
+        self.pack = MetaKernel(pack_kernels)
+        self.reset = reset
+        self.pre_blusgs = MetaKernel(pre_kernels)
+        self.blusgs_sweep = MetaKernel(sweep_kernels)
+        self.subresid = MetaKernel(subresid_kernels)
+        self.update = MetaKernel(update_kernels)
 
 
 class ColoredBlockLUSGSRelaxation(BaseBlockLUSGSRelaxation):
     name = 'colored-blu-sgs'
+    rank_layout_req = 'rank-coloring'
 
     def build(self, a0):
         from pybaram.integrators.blusgs import (
-            make_blusgs_update, make_colored_blusgs, make_pre_blusgs,
-            make_sub_residual, make_tpre_blusgs
+            make_ele_colored_blusgs_sweep, make_ele_pre_blusgs,
+            make_rank_blusgs_diag_pack, make_rank_blusgs_update,
+            make_rank_sub_residual, make_rank_tblusgs_pack
         )
 
         intg = self._intg
         be = intg.be
 
         self._init_subiteration_controls()
+        self.a0 = a0
         idx_u = intg._curr_idx
         idx_rhs = intg._rhs_idx
+        sys = intg.sys
+        eles = list(sys.eles)
 
-        for ele in intg.sys.eles:
-            ncolor, _icolor, _lev_color = ele.coloring()
-            icolor = be.convert_array(_icolor)
-            lev_color = be.convert_array(_lev_color)
+        nlocal = sys.rank_neles
+        nvars = eles[0].nvars
+        nfvars = eles[0].nfvars
 
-            fnorm_vol = be.convert_array(ele.fnorm_vol)
-            nei_ele = be.convert_array(ele.nei_ele)
-            diag = be.alloc_array((ele.nfvars, ele.nfvars, ele.neles))
+        # Rank-cell correction arrays and flow diagonal blocks.
+        rank_du = be.alloc_array((nvars, nlocal))
+        rank_dup = be.alloc_array((nvars, nlocal))
+        flow_diag = be.alloc_array((nfvars, nfvars, nlocal))
 
-            ele.du = ArrayBank(ele.fpts, 1)
-            ele.dup = ArrayBank(ele.fpts, 2)
+        pack_kernels = []
+        update_kernels = []
+        subresid_kernels = []
+        for ele in eles:
+            cell_ids = sys.rank_ele_cell_ids[ele]
 
-            nv = (0, ele.nfvars)
-            pre_blusgs = make_pre_blusgs(be, ele, nv, a0=a0)
-            sweep = make_colored_blusgs(be, ele, nv)
+            # Initialize flow diagonal blocks in rank-cell storage.
+            pack = make_rank_blusgs_diag_pack(ele)
+            pack_kernels.append(Kernel(
+                *be.make_loop(ele.neles, pack, cell_ids),
+                ele.dt, flow_diag
+            ))
 
-            pre_blusgs = Kernel(
-                *be.make_loop(ele.neles, pre_blusgs, fnorm_vol),
-                ele.dt, diag, ele.jmat
+            # Scatter the rank-cell correction back to element-local storage.
+            update = make_rank_blusgs_update(ele)
+            update_kernels.append(Kernel(
+                *be.make_loop(ele.neles, update, cell_ids),
+                ele.upts[idx_u], rank_du
+            ))
+
+            # Track correction changes for block LU-SGS sub-convergence.
+            subresid = make_rank_sub_residual(ele)
+            subresid_kernels.append(Kernel(
+                *be.make_loop(ele.neles, subresid, cell_ids),
+                ele.vol, rank_du, rank_dup, ele.resid_out
+            ))
+
+        # Element-local off-diagonal blocks are indexed by face and cell.
+        flow_offdiag = {
+            ele: be.alloc_array(
+                (nfvars, nfvars, ele.nface, ele.neles)
             )
-            lsweeps = [
-                Kernel(
-                    *be.make_loop(ne, sweep, fnorm_vol, nei_ele,
-                                  icolor, lev_color, n0=n0),
-                    ele.upts[idx_rhs], ele.du, diag, ele.jmat
-                )
-                for n0, ne in zip(ncolor[:-1], ncolor[1:])
-            ]
-            usweeps = [
-                Kernel(
-                    *be.make_loop(ne, sweep, fnorm_vol, nei_ele,
-                                  icolor, lev_color, n0=n0),
-                    ele.upts[idx_rhs], ele.du, diag, ele.jmat
-                )
-                for n0, ne in zip(ncolor[::-1][1:], ncolor[::-1][:-1])
-            ]
+            for ele in eles
+        }
+        pre_kernels = []
+        for ele in eles:
+            # Assemble and factorize flow diagonal blocks; cache off-diagonal
+            # face blocks for colored sweeps.
+            pre_flow = make_ele_pre_blusgs(be, ele, nfvars)
+            pre_kernels.append(Kernel(
+                *be.make_loop(
+                    ele.neles, pre_flow,
+                    sys.rank_ele_cell_ids[ele],
+                    sys.rank_ele_face_refs[ele],
+                    sys.rank_ele_face_factors[ele]
+                ),
+                flow_diag, flow_offdiag[ele], sys.rank_jmat
+            ))
 
-            pre_kernels = [pre_blusgs]
-            sweep_kernels = [*lsweeps, *usweeps]
-
-            if intg._is_turb:
-                ele.tdiag = be.alloc_array(
-                    (ele.nturbvars, ele.nturbvars, ele.neles)
+        def make_sweeps(var0, nblock, diag, offdiag):
+            # Build one element-local colored sweep kernel per element type.
+            sweeps = {
+                ele: make_ele_colored_blusgs_sweep(
+                    be, ele, var0, nblock
                 )
-                tnv = (ele.nfvars, ele.nvars)
+                for ele in eles
+            }
 
-                srcjacobian = ele.make_source_jacobian()
-                pre_tblusgs = make_tpre_blusgs(
-                    be, ele, tnv, srcjacobian, intg._tcfl_fac, a0=a0
-                )
-                pre_tblusgs = Kernel(
-                    *be.make_loop(ele.neles, pre_tblusgs, fnorm_vol),
-                    ele.upts[idx_u], ele.dt, ele.tdiag, ele.tjmat, ele.dsrc
-                )
+            def make_color_kernels(color):
+                kernels = []
+                for ele in eles:
+                    # Offsets select this rank color inside
+                    # rank_ele_color_order[ele].
+                    offsets = sys.rank_ele_color_offsets[ele]
+                    begin, end = offsets[color:color + 2]
+                    if begin == end:
+                        continue
 
-                tsweep = make_colored_blusgs(be, ele, tnv)
-                tlsweeps = [
-                    Kernel(
-                        *be.make_loop(ne, tsweep, fnorm_vol, nei_ele,
-                                      icolor, lev_color, n0=n0),
-                        ele.upts[idx_rhs], ele.du, ele.tdiag, ele.tjmat
+                    face_args = (
+                        sys.rank_ele_color_order[ele],
+                        sys.rank_ele_cell_ids[ele],
+                        sys.rank_ele_neighbors[ele]
                     )
-                    for n0, ne in zip(ncolor[:-1], ncolor[1:])
-                ]
-                tusweeps = [
-                    Kernel(
-                        *be.make_loop(ne, tsweep, fnorm_vol, nei_ele,
-                                      icolor, lev_color, n0=n0),
-                        ele.upts[idx_rhs], ele.du, ele.tdiag, ele.tjmat
-                    )
-                    for n0, ne in zip(ncolor[::-1][1:], ncolor[::-1][:-1])
-                ]
+                    kernels.append(Kernel(
+                        *be.make_loop(
+                            end, sweeps[ele], *face_args, n0=begin
+                        ),
+                        ele.upts[idx_rhs], rank_du, diag, offdiag[ele]
+                    ))
+                return kernels
 
-                pre_kernels += [pre_tblusgs]
-                sweep_kernels += [*tlsweeps, *tusweeps]
+            ncolors = sys.rank_ncolors
+            # Forward and backward passes walk color barriers in opposite
+            # directions.
+            forward = [
+                kern
+                for color in range(ncolors)
+                for kern in make_color_kernels(color)
+            ]
+            backward = [
+                kern
+                for color in range(ncolors - 1, -1, -1)
+                for kern in make_color_kernels(color)
+            ]
+            return [*forward, *backward]
 
-            ele.pre_blusgs = MetaKernel(pre_kernels)
-            ele.blusgs_sweep = MetaKernel(sweep_kernels)
+        sweep_kernels = make_sweeps(
+            0, nfvars, flow_diag, flow_offdiag
+        )
 
-            self._make_update_kernels(
-                ele, make_blusgs_update, make_sub_residual
+        if intg._is_turb:
+            nturbvars = nvars - nfvars
+
+            # Turbulence uses a separate block diagonal and source Jacobian.
+            turb_diag = be.alloc_array((nturbvars, nturbvars, nlocal))
+            for ele in eles:
+                cell_ids = sys.rank_ele_cell_ids[ele]
+                pack_turb = make_rank_tblusgs_pack(
+                    ele, ele.make_source_jacobian(),
+                    factor=intg._tcfl_fac
+                )
+                pack_kernels.append(Kernel(
+                    *be.make_loop(ele.neles, pack_turb, cell_ids),
+                    ele.upts[idx_u], ele.dt, ele.dsrc, turb_diag
+                ))
+
+            # Turbulence off-diagonal blocks mirror the flow layout with a
+            # different block size.
+            turb_offdiag = {
+                ele: be.alloc_array(
+                    (nturbvars, nturbvars, ele.nface, ele.neles)
+                )
+                for ele in eles
+            }
+            for ele in eles:
+                # Assemble and factorize turbulence diagonal blocks.
+                pre_turb = make_ele_pre_blusgs(
+                    be, ele, nturbvars
+                )
+                pre_kernels.append(Kernel(
+                    *be.make_loop(
+                        ele.neles, pre_turb,
+                        sys.rank_ele_cell_ids[ele],
+                        sys.rank_ele_face_refs[ele],
+                        sys.rank_ele_face_factors[ele]
+                    ),
+                    turb_diag, turb_offdiag[ele], sys.rank_tjmat
+                ))
+            sweep_kernels += make_sweeps(
+                nfvars, nturbvars, turb_diag, turb_offdiag
             )
 
+        def reset():
+            # Start each block LU-SGS solve from a zero correction.
+            rank_du[:] = 0
+            rank_dup[:] = 0
 
-class PETScRelaxation(BaseRelaxation):
-    """Per-element PETSc KSP relaxation.
+        # Keep reusable work arrays and kernel groups for step().
+        self.rank_du = rank_du
+        self.rank_dup = rank_dup
+        self.flow_diag = flow_diag
+        self.flow_offdiag = flow_offdiag
+        if intg._is_turb:
+            self.turb_diag = turb_diag
+            self.turb_offdiag = turb_offdiag
+        self.pack = MetaKernel(pack_kernels)
+        self.reset = reset
+        self.pre_blusgs = MetaKernel(pre_kernels)
+        self.blusgs_sweep = MetaKernel(sweep_kernels)
+        self.subresid = MetaKernel(subresid_kernels)
+        self.update = MetaKernel(update_kernels)
 
-    Each element group builds a partition-local BSR system from the existing
-    face Jacobian storage, solves it with PETSc KSP, and scatters the solution
-    back to the SOA correction buffer ele.du.
-    """
 
-    name = 'petsc'
+class _BasePETScRelaxation(BaseRelaxation):
+    """Shared PETSc KSP relaxation build and step logic."""
+
     impl_op = 'approx-jacobian'
+    rank_layout_req = 'rank-order'
 
-    def build(self, a0):
-        from pybaram.integrators.blusgs import make_blusgs_update
+    def _set_ksp_divergence_policy(self):
+        # Configure how PETSc KSP divergence is reported after each solve.
+        policy = self._cfg.get(
+            'solver-petsc', 'ksp-divergence', 'warn'
+        ).lower()
+        if policy not in ('ignore', 'warn', 'raise'):
+            raise ValueError(
+                "solver-petsc ksp-divergence must be ignore, warn, or raise"
+            )
+        self._ksp_divergence_policy = policy
+
+    def _check_ksp_reason(self, reason, label):
+        # Apply the configured policy to PETSc's convergence reason.
+        if reason >= 0 or self._ksp_divergence_policy == 'ignore':
+            return
+
+        message = "{} KSP diverged (PETSc reason {})".format(label, reason)
+        if self._ksp_divergence_policy == 'raise':
+            raise RuntimeError(message)
+        if self._intg._comm.rank == 0:
+            print("Warning: {}".format(message))
+
+    def _build_petsc(
+        self, a0, solve_cls, make_patterns, parallel, solve_kwargs=None
+    ):
         from pybaram.integrators.petsc import (
-            PETScElementSolve, make_bsr_patterns, make_petsc_systems
+            make_rank_petsc_scatter, make_rank_petsc_update
         )
 
         intg = self._intg
+        be = intg.be
+        sys = intg.sys
+        idx_u = intg._curr_idx
+        if solve_kwargs is None:
+            solve_kwargs = {}
 
-        # Keep PETSc helpers as attributes so the main build path stays local.
-        self._petsc_element_solve_cls = PETScElementSolve
-        self._make_bsr_patterns = make_bsr_patterns
-        self._make_petsc_systems = make_petsc_systems
+        # Read KSP divergence handling before PETSc solve objects are built.
+        self._set_ksp_divergence_policy()
 
-        # Time term and PETSc KSP controls.
-        petsc_sect = 'solver-petsc'
+        # Store the time term and KSP controls for linear solves.
         self.a0 = a0
-        self.ksp_type = self._cfg.get(petsc_sect, 'ksp', 'gmres')
-        self.rtol = self._cfg.getfloat(petsc_sect, 'sub-rtol', 1e-3)
-        self.atol = self._cfg.getfloat(petsc_sect, 'sub-atol', 1e-15)
-        self.max_it = self._cfg.getint(petsc_sect, 'sub-iter', 30)
-        self.precon = self._cfg.get(petsc_sect, 'preconditioner', 'ilu')
-        self.pc_factor_levels = self._cfg.getint(
-            petsc_sect, 'pc-factor-levels', 0
-        )
+        petsc_sect = 'solver-petsc'
+        ksp_opts = {
+            'atol': self._cfg.getfloat(petsc_sect, 'sub-atol', 1e-15),
+            'rtol': self._cfg.getfloat(petsc_sect, 'sub-rtol', 1e-3),
+            'max_it': self._cfg.getint(petsc_sect, 'sub-iter', 30),
+            'type': self._cfg.get(petsc_sect, 'ksp', 'gmres'),
+            'pc': self._cfg.get(petsc_sect, 'preconditioner', 'ilu'),
+            'pc_levels': self._cfg.getint(
+                petsc_sect, 'pc-factor-levels', 0
+            ),
+            'parallel': parallel
+        }
 
         for ele in intg.sys.eles:
-            # PETSc writes the linear solve result into ele.du.
+            # PETSc solutions are scattered into ele.du before update().
             ele.du = ArrayBank(ele.fpts, 1)
-            self._make_update_kernel(ele, make_blusgs_update)
-
-        # Build per-element-group BSR layouts before creating PETSc objects.
-        self._make_layout()
-
-        # Scatter PETSc solution vectors back into SOA element storage.
-        self._scatter_flow_solution = self._make_solution_scatter_kernels(
-            0, self._nvars
-        )
-        if intg._is_turb:
-            self._scatter_turb_solution = self._make_solution_scatter_kernels(
-                self._nvars, self._tnvars
+            update = make_rank_petsc_update(ele)
+            ele.update = Kernel(
+                *be.make_loop(ele.neles, update), ele.upts[idx_u], ele.du
             )
 
-        # Backend kernels fill BSR values and RHS vectors for each solve.
+        ele0 = next(iter(sys.eles))
+        self._nvars = nvars = ele0.nfvars
+        if intg._is_turb:
+            self._tnvars = tnv = ele0.nturbvars
+        else:
+            tnv = None
+
+        # BSR patterns provide PETSc rows and backend assembly slots.
+        self._flow_pattern, self._turb_pattern = make_patterns(nvars, tnv)
+
+        # Element-local cells are indexed into rank-cell PETSc vectors.
+        self._cell_ids = {
+            ele: be.convert_array(
+                np.asarray(sys.rank_cell_ids[ele], dtype=np.int32)
+            )
+            for ele in sys.eles
+        }
+
+        def make_scatter(var0, nv):
+            kernels = []
+            for ele in intg.sys.eles:
+                # Scatter rank-cell-major vectors back to element SOA storage.
+                scatter = make_rank_petsc_scatter(var0, nv)
+                kernels.append(Kernel(
+                    *be.make_loop(ele.neles, scatter, self._cell_ids[ele]),
+                    ele.du
+                ))
+
+            return MetaKernel(kernels)
+
+        self._scatter_flow_solution = make_scatter(0, nvars)
+        if intg._is_turb:
+            self._scatter_turb_solution = make_scatter(nvars, tnv)
+
+        # Pack RHS/diagonal terms, then add face Jacobian blocks.
         self._assemble_flow = self._make_flow_assembly_kernels()
         if intg._is_turb:
             self._assemble_turb = self._make_turb_assembly_kernels()
 
-        # Allocate reusable PETSc matrices, vectors, and KSP wrappers.
-        self._make_petsc_objects()
+        # Create PETSc solve objects; their matrices, vectors, and KSPs are
+        # reused between steps.
+        self.petsc_flow_solve = solve_cls(
+            self._flow_pattern, self._assemble_flow,
+            self._scatter_flow_solution, opts=ksp_opts, **solve_kwargs
+        )
+        if intg._is_turb:
+            self.petsc_turb_solve = solve_cls(
+                self._turb_pattern, self._assemble_turb,
+                self._scatter_turb_solution, opts=ksp_opts, **solve_kwargs
+            )
 
-        # Expose solve callables through the element MetaKernel interface.
-        self._bind_element_solvers()
+    def _make_assembly_kernel(self, pattern, nvars, jmat, pack_kernels):
+        from pybaram.integrators.petsc import make_rank_petsc_face_assemble
 
-    def _make_update_kernel(self, ele, make_blusgs_update):
         intg = self._intg
         be = intg.be
-        idx_u = intg._curr_idx
+        sys = intg.sys
 
-        update = make_blusgs_update(ele)
-        ele.update = Kernel(
-            *be.make_loop(ele.neles, update), ele.upts[idx_u], ele.du
+        # Add face Jacobian blocks into the PETSc BSR value array.
+        face_assemble = make_rank_petsc_face_assemble(nvars)
+        face_kernel = Kernel(
+            *be.make_loop(
+                sys.rank_neles, face_assemble,
+                sys.rank_face_indptr, sys.rank_face_slots,
+                sys.rank_face_sides, sys.rank_face_area, sys.rank_rcp_vol,
+                pattern.diag_slots, pattern.off_slots, jmat
+            )
         )
 
-    def _make_layout(self):
-        intg = self._intg
+        # Run all element pack kernels for RHS and diagonal BSR terms.
+        pack = MetaKernel(pack_kernels)
 
-        ele0 = next(iter(intg.sys.eles))
-        self._nvars = nvars = ele0.nfvars
-        if intg._is_turb:
-            self._tnvars = tnv = ele0.nturbvars
+        def assemble(values, rhs):
+            # First pack element terms, then add face Jacobian blocks.
+            pack(self.a0, values, rhs)
+            face_kernel(values)
 
-        for ele in intg.sys.eles:
-            if ele.nfvars != nvars:
-                raise ValueError(
-                    "petsc requires a consistent number of flow "
-                    "variables across element types"
-                )
-
-            if intg._is_turb and ele.nturbvars != tnv:
-                raise ValueError(
-                    "petsc requires a consistent number of "
-                    "turbulent variables across element types"
-                )
-
-        # Flow equations use one BSR system per element group.
-        self._flow_patterns = self._make_bsr_patterns(intg.sys.eles, nvars)
-
-        # Turbulence equations are solved separately with their own block size.
-        if intg._is_turb:
-            self._turb_patterns = self._make_bsr_patterns(
-                intg.sys.eles, tnv
-            )
-
-    def _make_petsc_objects(self):
-        try:
-            from petsc4py import PETSc
-        except ImportError as exc:
-            raise RuntimeError(
-                "petsc requires petsc4py to be installed"
-            ) from exc
-
-        self._petsc_insert_mode = PETSc.InsertMode.INSERT_VALUES
-
-        # Use COMM_SELF so each MPI rank solves only its local element systems.
-        self._flow_systems = self._make_petsc_systems(
-            self._flow_patterns, PETSc
-        )
-
-        # Turbulence equations get separate PETSc systems from flow equations.
-        if self._intg._is_turb:
-            self._turb_systems = self._make_petsc_systems(
-                self._turb_patterns, PETSc
-            )
-
-    def _bind_element_solvers(self):
-        for ele in self._intg.sys.eles:
-            # Bind the flow linear solve to this element group.
-            ele.petsc_flow_solve = self._petsc_element_solve_cls(
-                self._flow_systems[ele],
-                self._assemble_flow[ele],
-                self._scatter_flow_solution[ele],
-                self._make_ksp,
-                self._petsc_insert_mode
-            )
-
-            if self._intg._is_turb:
-                # Bind the turbulence linear solve when turbulence is enabled.
-                ele.petsc_turb_solve = self._petsc_element_solve_cls(
-                    self._turb_systems[ele],
-                    self._assemble_turb[ele],
-                    self._scatter_turb_solution[ele],
-                    self._make_ksp,
-                    self._petsc_insert_mode
-                )
-
-    def _make_solution_scatter_kernels(self, var0, nvars):
-        intg = self._intg
-        be = intg.be
-        kernels = {}
-
-        # PETSc vectors are cell-major; ele.du is SOA by variable.
-        for ele in intg.sys.eles:
-            def copy_solution(i_begin, i_end, du, sol):
-                for idx in range(i_begin, i_end):
-                    base = idx*nvars
-
-                    for kdx in range(nvars):
-                        du[var0 + kdx, idx] = sol[base + kdx]
-
-            kernels[ele] = Kernel(
-                *be.make_loop(ele.neles, copy_solution), ele.du
-            )
-
-        return kernels
+        return assemble
 
     def _make_flow_assembly_kernels(self):
+        from pybaram.integrators.petsc import make_rank_petsc_rhs_pack
+
         intg = self._intg
         be = intg.be
         idx_rhs = intg._rhs_idx
         nvars = self._nvars
-        a0 = self.a0
-        kernels = {}
+        sys = intg.sys
+        pattern = self._flow_pattern
+        pack_kernels = []
 
         for ele in intg.sys.eles:
-            nface = ele.nface
-            pattern = self._flow_patterns[ele]
-            diag_slots = pattern.diag_slots
-            off_slots = pattern.off_slots
-            bs2 = nvars*nvars
+            # Flow RHS and pseudo-time diagonal are packed per rank cell.
+            pack = make_rank_petsc_rhs_pack(0, nvars)
+            pack_kernels.append(Kernel(
+                *be.make_loop(ele.neles, pack, self._cell_ids[ele]),
+                ele.upts[idx_rhs], ele.dt, pattern.diag_slots
+            ))
 
-            def make_assemble_bsr(nface):
-                # Bind nface per element group. Without this factory, mixed
-                # meshes can accidentally use the last group's face count.
-                def assemble_bsr(i_begin, i_end, rhs, dt, jmat, fnorm_vol,
-                                 nei_ele, diag_slots, off_slots, av, bv):
-                    for idx in range(i_begin, i_end):
-                        base = idx*nvars
-
-                        for kdx in range(nvars):
-                            bv[base + kdx] = rhs[kdx, idx]
-
-                        for row in range(nvars):
-                            for col in range(nvars):
-                                val = 0.0
-                                entry = row*nvars + col
-
-                                for jdx in range(nface):
-                                    val += (
-                                        jmat[0, row, col, jdx, idx]
-                                        * fnorm_vol[jdx, idx]
-                                    )
-
-                                if row == col:
-                                    val += 1/dt[idx] + a0
-
-                                av[diag_slots[idx]*bs2 + entry] += val
-
-                        for jdx in range(nface):
-                            neib = nei_ele[jdx, idx]
-
-                            if neib == idx:
-                                continue
-
-                            fv = fnorm_vol[jdx, idx]
-
-                            for row in range(nvars):
-                                for col in range(nvars):
-                                    entry = row*nvars + col
-                                    av[off_slots[jdx, idx]*bs2 + entry] += (
-                                        jmat[1, row, col, jdx, idx]*fv
-                                    )
-
-                return assemble_bsr
-
-            kernels[ele] = Kernel(
-                *be.make_loop(ele.neles, make_assemble_bsr(nface)),
-                ele.upts[idx_rhs], ele.dt, ele.jmat, ele.fnorm_vol,
-                ele.nei_ele, diag_slots, off_slots
-            )
-
-        return kernels
+        # Combine flow packing with flow face Jacobian assembly.
+        return self._make_assembly_kernel(
+            pattern, nvars, sys.rank_jmat, pack_kernels
+        )
 
     def _make_turb_assembly_kernels(self):
+        from pybaram.integrators.petsc import make_rank_petsc_turb_pack
+
         intg = self._intg
         be = intg.be
         idx_rhs = intg._rhs_idx
         idx_u = intg._curr_idx
         nvars = self._tnvars
-        a0 = self.a0
         tcfl_fac = intg._tcfl_fac
-        kernels = {}
+        sys = intg.sys
+        pattern = self._turb_pattern
+        pack_kernels = []
 
         for ele in intg.sys.eles:
-            nface = ele.nface
-            nfvars = ele.nfvars
-            pattern = self._turb_patterns[ele]
-            diag_slots = pattern.diag_slots
-            off_slots = pattern.off_slots
+            # Turbulence packing also adds the local source Jacobian.
             srcjacobian = ele.make_source_jacobian()
-            array = be.local()
-            bs2 = nvars*nvars
-
-            def make_assemble_tbsr(nface, nfvars, srcjacobian):
-                # Bind element-specific values for mixed meshes. In particular
-                # nfvars and source Jacobian can differ from the last group.
-                def assemble_tbsr(i_begin, i_end, rhs, upts, dt, tjmat,
-                                  fnorm_vol, nei_ele, dsrc, diag_slots,
-                                  off_slots, av, bv):
-                    for idx in range(i_begin, i_end):
-                        base = idx*nvars
-
-                        for kdx in range(nvars):
-                            bv[base + kdx] = rhs[nfvars + kdx, idx]
-
-                        tmat = array((nvars, nvars), np.float64)
-
-                        for row in range(nvars):
-                            for col in range(nvars):
-                                val = 0.0
-
-                                for jdx in range(nface):
-                                    val += (
-                                        tjmat[0, row, col, jdx, idx]
-                                        * fnorm_vol[jdx, idx]
-                                    )
-
-                                tmat[row, col] = val
-
-                        srcjacobian(upts[:, idx], tmat, dsrc[:, idx])
-
-                        for row in range(nvars):
-                            for col in range(nvars):
-                                val = tmat[row, col]
-                                entry = row*nvars + col
-
-                                if row == col:
-                                    val += 1/(dt[idx]*tcfl_fac) + a0
-
-                                av[diag_slots[idx]*bs2 + entry] += val
-
-                        for jdx in range(nface):
-                            neib = nei_ele[jdx, idx]
-
-                            if neib == idx:
-                                continue
-
-                            fv = fnorm_vol[jdx, idx]
-
-                            for row in range(nvars):
-                                for col in range(nvars):
-                                    entry = row*nvars + col
-                                    av[off_slots[jdx, idx]*bs2 + entry] += (
-                                        tjmat[1, row, col, jdx, idx]*fv
-                                    )
-
-                return assemble_tbsr
-
-            kernels[ele] = Kernel(
-                *be.make_loop(
-                    ele.neles,
-                    make_assemble_tbsr(nface, nfvars, srcjacobian)
-                ),
-                ele.upts[idx_rhs], ele.upts[idx_u], ele.dt, ele.tjmat,
-                ele.fnorm_vol, ele.nei_ele, ele.dsrc, diag_slots,
-                off_slots
+            pack = make_rank_petsc_turb_pack(
+                be, ele, srcjacobian, factor=tcfl_fac
             )
+            pack_kernels.append(Kernel(
+                *be.make_loop(ele.neles, pack, self._cell_ids[ele]),
+                ele.upts[idx_rhs], ele.upts[idx_u], ele.dt, ele.dsrc,
+                pattern.diag_slots
+            ))
 
-        return kernels
-
-    def _make_ksp(self, A):
-        from petsc4py import PETSc
-
-        # Create a rank-local Krylov solver for one element group's matrix.
-        ksp = PETSc.KSP().create(PETSc.COMM_SELF)
-        ksp.setOperators(A)
-        ksp.setType(self.ksp_type)
-        ksp.setTolerances(
-            rtol=self.rtol, atol=self.atol, max_it=self.max_it
+        # Combine turbulence packing with turbulence face Jacobian assembly.
+        return self._make_assembly_kernel(
+            pattern, nvars, sys.rank_tjmat, pack_kernels
         )
-
-        # The preconditioner type is configurable; ILU is the default.
-        pc = ksp.getPC()
-        pc.setType(self.precon)
-        pc.setFactorLevels(self.pc_factor_levels)
-
-        # Let command-line PETSc options override the defaults above.
-        ksp.setFromOptions()
-
-        return ksp
-
-    def _reduce_solver_stats(self, stats):
-        nit = max(s[0] for s in stats)
-        subres = max(s[1] for s in stats)
-
-        return nit, subres
 
     def step(self, **kwargs):
         intg = self._intg
 
+        # Evaluate residuals and approximate Jacobian blocks.
         resid = intg.rhs_resid(0, 1, **kwargs)
 
+        # Clear element correction buffers before PETSc scatters solve results.
         intg.sys.eles.du.set(0)
 
-        nit, subres = self._reduce_solver_stats(
-            intg.sys.eles.petsc_flow_solve()
-        )
+        # Solve the flow correction in PETSc rank-cell storage.
+        nit, subres, reason = self.petsc_flow_solve()
+        self._check_ksp_reason(reason, 'flow')
 
         if intg._is_turb:
-            tnit, tsubres = self._reduce_solver_stats(
-                intg.sys.eles.petsc_turb_solve()
-            )
+            # Turbulence is solved as a separate PETSc system.
+            tnit, tsubres, treason = self.petsc_turb_solve()
+            self._check_ksp_reason(treason, 'turbulence')
             nit = max(nit, tnit)
             subres = max(subres, tsubres)
 
+        # Scatter corrections to elements, update solution, and postprocess.
         intg.sys.eles.update()
         intg.sys.post(0)
 
+        # Report the worst PETSc sub-solve statistics for this step.
         intg.subitnum = nit
         intg.subres = subres
 
         return 0, resid
+
+
+class PETScRankRelaxation(_BasePETScRelaxation):
+    """Rank-local PETSc KSP relaxation."""
+
+    name = 'petsc-rank'
+
+    def build(self, a0):
+        from pybaram.integrators.petsc import (
+            PETScRankSolve, make_rank_bsr_pattern
+        )
+
+        sys = self._intg.sys
+
+        def make_patterns(nvars, tnv):
+            # Rank-local PETSc uses rank-cell block columns.
+            flow_pattern = make_rank_bsr_pattern(
+                sys.rank_face_indptr, sys.rank_face_neighbors,
+                sys.rank_neles, nvars
+            )
+            turb_pattern = None
+            if tnv is not None:
+                turb_pattern = make_rank_bsr_pattern(
+                    sys.rank_face_indptr, sys.rank_face_neighbors,
+                    sys.rank_neles, tnv
+                )
+
+            return flow_pattern, turb_pattern
+
+        self._build_petsc(
+            a0, PETScRankSolve, make_patterns, parallel=False
+        )
+
+
+class PETScGlobalRelaxation(_BasePETScRelaxation):
+    """Distributed PETSc KSP relaxation with MPI-interface couplings."""
+
+    name = 'petsc'
+
+    def build(self, a0):
+        from pybaram.integrators.petsc import (
+            BSRPattern, PETScGlobalSolve, make_global_bsr_pattern
+        )
+
+        intg = self._intg
+        sys = intg.sys
+
+        def make_patterns(nvars, tnv):
+            # Distributed PETSc uses local rows and global block columns.
+            flow_pattern = make_global_bsr_pattern(
+                sys.rank_face_indptr, sys.rank_face_neighbors,
+                sys.rank_neles, sys.mpiint, list(sys.eles),
+                sys.rank_cell_ids, intg._comm, nvars
+            )
+            turb_pattern = None
+            if tnv is not None:
+                ncells = flow_pattern.global_ndof//nvars
+
+                # Reuse connectivity with turbulence block/vector sizes.
+                turb_pattern = BSRPattern(
+                    rowptr=flow_pattern.rowptr,
+                    colidx=flow_pattern.colidx,
+                    diag_slots=flow_pattern.diag_slots,
+                    off_slots=flow_pattern.off_slots,
+                    local_ndof=sys.rank_neles*tnv,
+                    global_ndof=ncells*tnv,
+                    bsize=tnv
+                )
+
+            return flow_pattern, turb_pattern
+
+        # Pack/assemble/scatter kernels still operate on locally owned rows.
+        self._build_petsc(
+            a0, PETScGlobalSolve, make_patterns,
+            parallel=self._intg._comm.size > 1,
+            solve_kwargs={'comm': self._intg._comm}
+        )

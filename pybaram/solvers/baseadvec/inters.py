@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from pybaram.solvers.base import BaseIntInters, BaseBCInters, BaseMPIInters
-from pybaram.backends.types import Kernel, NullKernel
+from pybaram.backends.types import (
+    Kernel, NullKernel, MPIPackKernel, MPIUnpackKernel, MPISendKernel
+)
 from pybaram.utils.np import npeval
 
 import numpy as np
@@ -41,9 +43,11 @@ class BaseAdvecMPIInters(BaseMPIInters):
 
     def construct_kernels(self, elemap):
         # Buffers
-        # TODO : Heterogeneous computing
-        lhs = self.be.alloc_array((self.nvars, self.nfpts))
-        self._rhs = rhs = self.be.alloc_array((self.nvars, self.nfpts))
+        self.rawlhs = self.be.alloc_array((self.nvars, self.nfpts), pinned=True)
+        self.rawrhs = self.be.alloc_array((self.nvars, self.nfpts), pinned=True)
+
+        self.lhs = lhs = self.be.convert_array(self.rawlhs)
+        self._rhs = rhs = self.be.convert_array(self.rawrhs)
 
         # View of elemenet array
         self._fpts = fpts = tuple(cell.fpts for cell in elemap.values())
@@ -55,17 +59,30 @@ class BaseAdvecMPIInters(BaseMPIInters):
             self.compute_delu = NullKernel
 
         # Kernel for pack, send, receive
-        self.pack = Kernel(*self._make_pack(), lhs, fpts)
-        self.send, self.sreq = self._make_send(lhs)
-        self.recv, self.rreq = self._make_recv(rhs)
+        pack = Kernel(*self._make_pack(), lhs, fpts)
+        send, self.sreq = self._make_send(self.rawlhs)
+        self.send = MPISendKernel(self.be, send)
+        self.recv, self.rreq = self._make_recv(self.rawrhs)
+
+        # Sync Host <-> Device
+        if self.be.name == 'cuda':
+            dtoh = Kernel(self.be.copy_array('d2h'), self.rawlhs, lhs)
+            htod = Kernel(self.be.copy_array('h2d'), rhs, self.rawrhs)
+        else:
+            dtoh = NullKernel()
+            htod = NullKernel()
+
+        self.pack = MPIPackKernel(self.be, pack, dtoh)
+        self.unpack = MPIUnpackKernel(self.be, htod)
+        self.pre_send = NullKernel()
+        self.post_recv = self.unpack
 
     def _make_delu(self):
         nvars = self.nvars
-        lt, le, lf = self.rawlidx
 
-        def compute_delu(i_begin, i_end, rhs, uf):
+        def compute_delu(i_begin, i_end, lidx, rhs, uf):
             for idx in range(i_begin, i_end):
-                lti, lfi, lei = lt[idx], lf[idx], le[idx]
+                lti, lei, lfi = lidx[:, idx]
 
                 for jdx in range(nvars):
                     ul = uf[lti][lfi, jdx, lei]
@@ -73,20 +90,19 @@ class BaseAdvecMPIInters(BaseMPIInters):
                     du = ur - ul
                     uf[lti][lfi, jdx, lei] = du
 
-        return self.be.make_loop(self.nfpts, compute_delu)
+        return self.be.make_loop(self.nfpts, compute_delu, self.lidx)
 
     def _make_pack(self):
         nvars = self.nvars
-        lt, le, lf = self.rawlidx
 
-        def pack(i_begin, i_end, lhs, uf):
+        def pack(i_begin, i_end, lidx, lhs, uf):
             for idx in range(i_begin, i_end):
-                lti, lfi, lei = lt[idx], lf[idx], le[idx]
+                lti, lei, lfi = lidx[:, idx]
 
                 for jdx in range(nvars):
                     lhs[jdx, idx] = uf[lti][lfi, jdx, lei]
 
-        return self.be.make_loop(self.nfpts, pack)
+        return self.be.make_loop(self.nfpts, pack, self.lidx)
 
     def _sendrecv(self, mpifn, arr):
         # MPI Send or Receive init

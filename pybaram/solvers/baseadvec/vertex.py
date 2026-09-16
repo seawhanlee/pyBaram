@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 from pybaram.utils.misc import ProxyList
-from pybaram.backends.types import Kernel, NullKernel
+from pybaram.backends.types import (
+    Kernel, NullKernel, MetaKernel, MPIPackKernel, MPIUnpackKernel,
+    MPISendKernel
+)
 from pybaram.solvers.base import BaseVertex
 
 import numpy as np
@@ -24,17 +27,17 @@ class BaseAdvecVertex(BaseVertex):
         limiter = self.cfg.get('solver', 'limiter', 'none')
 
         if order > 1 and limiter != 'none':
-            # Kernel to compute exterems at vertex
-            upts_in = tuple(ele.upts_in for ele in elemap.values())
-            self.nele = len(upts_in)
-            self.compute_extv = Kernel(*self._make_extv(), self.vpts, upts_in)
-
             if self._neivtx:
                 # Construct kernels for MPI communication at vertex
                 self.mpi = True
                 self._construct_neighbors(self._neivtx)
             else:
                 self.mpi = False
+
+            # Kernel to compute exterems at vertex
+            upts_in = tuple(ele.upts_in for ele in elemap.values())
+            self.nele = len(upts_in)
+            self.compute_extv = Kernel(*self._make_extv(), self.vpts, upts_in)
         else:
             self.compute_extv = NullKernel
             self.mpi = False
@@ -66,25 +69,31 @@ class BaseAdvecVertex(BaseVertex):
     def _construct_neighbors(self, neivtx):
         from mpi4py import MPI
 
+        rawsbufs, rawrbufs = [], []
         sbufs, rbufs = [], []
         packs, unpacks = [], []
         sreqs, rreqs = [], []
+        ivtxs = []
 
         nvars = self.nvars
         for p, v in neivtx.items():
             # Make buffer
-            # TODO : Heterogeneous computing
             n = len(v)
-            sbuf = np.empty((2, nvars, n), dtype=np.float64)
-            rbuf = np.empty((2, nvars, n), dtype=np.float64)
+            rawsbuf = self.be.alloc_array((2, nvars, n), pinned=True)
+            rawrbuf = self.be.alloc_array((2, nvars, n), pinned=True)
+            sbuf = self.be.convert_array(rawsbuf)
+            rbuf = self.be.convert_array(rawrbuf)
 
+            rawsbufs.append(rawsbuf)
+            rawrbufs.append(rawrbuf)
             sbufs.append(sbuf)
             rbufs.append(rbuf)
+            ivtxs.append(self.be.convert_array(v))
 
-            packs.append(self._make_pack(v))
-            unpacks.append(self._make_unpack(v))
-            sreqs.append(self._make_send(sbuf, p))
-            rreqs.append(self._make_recv(rbuf, p))
+            packs.append(self._make_pack(n))
+            unpacks.append(self._make_unpack(n))
+            sreqs.append(self._make_send(rawsbuf, p))
+            rreqs.append(self._make_recv(rawrbuf, p))
 
         def _communicate(reqs):
             def runall(q):
@@ -95,21 +104,43 @@ class BaseAdvecVertex(BaseVertex):
             return runall
 
         # Start Sreqs (requsts for Send) and Rreqs (Request for Receive)
-        self.send = _communicate(sreqs)
+        self.send = MPISendKernel(self.be, _communicate(sreqs))
         self.recv = _communicate(rreqs)
 
-        # Pack and unpack vertex value before and after communication
-        self.pack = lambda: [pack[0](self.vpts, buf)
-                             for pack, buf in zip(packs, sbufs)]
-        self.unpack = lambda: [unpack[0](self.vpts, buf)
-                               for unpack, buf in zip(unpacks, rbufs)]
+        pack = MetaKernel([
+            Kernel(pack[0], ivtx, self.vpts, buf)
+            for pack, ivtx, buf in zip(packs, ivtxs, sbufs)
+        ])
+        unpack = MetaKernel([
+            Kernel(unpack[0], ivtx, self.vpts, buf)
+            for unpack, ivtx, buf in zip(unpacks, ivtxs, rbufs)
+        ])
 
         self.rbufs = ProxyList(rbufs)
 
-    def _make_pack(self, ivtx):
+        # Sync Host <-> Device
+        if self.be.name == 'cuda':
+            dtoh = MetaKernel([
+                Kernel(self.be.copy_array('d2h'), rawbuf, buf)
+                for buf, rawbuf in zip(sbufs, rawsbufs)
+            ])
+            htod = MetaKernel([
+                Kernel(self.be.copy_array('h2d'), buf, rawbuf)
+                for rawbuf, buf in zip(rawrbufs, rbufs)
+            ])
+        else:
+            dtoh = NullKernel()
+            htod = NullKernel()
+
+        self.pack = MPIPackKernel(self.be, pack, dtoh)
+        self.unpack = MPIUnpackKernel(self.be, htod, unpack)
+        self.pre_send = NullKernel()
+        self.post_recv = NullKernel()
+
+    def _make_pack(self, n):
         nvars = self.nvars
 
-        def pack(i_begin, i_end, vext, buf):
+        def pack(i_begin, i_end, ivtx, vext, buf):
             for idx in range(i_begin, i_end):
                 iv = ivtx[idx]
                 for jdx in range(nvars):
@@ -117,12 +148,12 @@ class BaseAdvecVertex(BaseVertex):
                     buf[0, jdx, idx] = vext[0, jdx, iv]
                     buf[1, jdx, idx] = vext[1, jdx, iv]
 
-        return self.be.make_loop(len(ivtx), pack)
+        return self.be.make_loop(n, pack)
 
-    def _make_unpack(self, ivtx):
+    def _make_unpack(self, n):
         nvars = self.nvars
 
-        def unpack(i_begin, i_end, vext, buf):
+        def unpack(i_begin, i_end, ivtx, vext, buf):
             for idx in range(i_begin, i_end):
                 iv = ivtx[idx]
                 for jdx in range(nvars):
@@ -130,7 +161,7 @@ class BaseAdvecVertex(BaseVertex):
                     vext[0, jdx, iv] = max(vext[0, jdx, iv], buf[0, jdx, idx])
                     vext[1, jdx, iv] = min(vext[1, jdx, iv], buf[1, jdx, idx])
 
-        return self.be.make_loop(len(ivtx), unpack)
+        return self.be.make_loop(n, unpack)
 
     def _make_send(self, buf, dest):
         from mpi4py import MPI

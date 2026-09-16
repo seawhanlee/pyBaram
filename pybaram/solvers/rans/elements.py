@@ -85,19 +85,7 @@ class RANSElements(BaseAdvecDiffElements):
         return False
 
     def _construct_impl_arrays(self, impl_op):
-        if impl_op == 'spectral-radius':
-            # Spectral radius (flow and turbulent model)
-            self.fspr = self.be.alloc_array((self.nface, self.neles))
-            self.tfspr = self.be.alloc_array((self.nface, self.neles))
-        elif impl_op == 'approx-jacobian':
-            # Jacobian matrices (flow and turbulent model)
-            # 2-dimensional arrays (FVS and Upwind)
-            self.jmat = self.be.alloc_array(
-                (2, self.nfvars, self.nfvars, self.nface, self.neles)
-            )
-            self.tjmat = self.be.alloc_array(
-                (2, self.nturbvars, self.nturbvars, self.nface, self.neles)
-            )
+        pass
 
     def _bind_aux_arrays(self):
         self.aux = self.be.convert_array(self.rawaux)

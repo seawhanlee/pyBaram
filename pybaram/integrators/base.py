@@ -11,7 +11,11 @@ class BaseIntegrator:
         self._comm = comm
         
         # Get system of equations
-        self.sys = get_system(be, cfg, msh, soln, comm, self.nreg, self.impl_op)
+        self.sys = get_system(
+            be, cfg, msh, soln, comm, self.nreg, self.impl_op,
+            getattr(self, 'rank_layout_req', None),
+            getattr(self, 'rank_layout_name', getattr(self, 'name', None))
+        )
         
         if soln is not None:
             soln.close()

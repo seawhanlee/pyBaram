@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import unittest
+from unittest.mock import patch
 
 from pybaram.__main__ import (
     build_parser,
@@ -10,6 +11,44 @@ from pybaram.__main__ import (
 
 
 class CliParserTest(unittest.TestCase):
+    def test_backend_and_ui_are_forwarded_together(self):
+        for command, files, process in (
+            ('run', ['mesh.pbrm', 'conf.ini'], process_run),
+            ('restart', ['mesh.pbrm', 'sol.pbrs', 'conf.ini'], process_restart),
+        ):
+            for backend in ('cpu', 'cuda'):
+                with self.subTest(command=command, backend=backend):
+                    args = build_parser().parse_args([
+                        command, *files, '--backend', backend, '--ui', 'tui'
+                    ])
+                    with patch('pybaram.readers.native.NativeReader') as reader, \
+                         patch('pybaram.inifile.INIFile') as config, \
+                         patch('pybaram.api.simulation.' + command) as execute:
+                        process(args)
+                        expected = [reader.return_value]
+                        if command == 'restart':
+                            expected.append(reader.return_value)
+                        expected.append(config.return_value)
+                        execute.assert_called_once_with(*expected, be=backend, ui='tui')
+
+    def test_cpu_remains_default_backend(self):
+        for argv in (['run', 'mesh', 'config'], ['restart', 'mesh', 'solution']):
+            self.assertEqual(build_parser().parse_args(argv).backend, 'cpu')
+
+    def test_coloring_method_is_forwarded(self):
+        for argv, function, positional in (
+            (['import', 'mesh.msh', 'mesh.pbrmc'], 'import_mesh',
+             ('mesh.msh', 'mesh.pbrmc', 1)),
+            (['partition', '2', 'mesh.pbrm', 'mesh.pbrmc'], 'partition_mesh',
+             ('mesh.pbrm', 'mesh.pbrmc', '2', [])),
+        ):
+            for method in ('greedy', 'smallest-last'):
+                with self.subTest(command=argv[0], method=method):
+                    args = build_parser().parse_args(argv + ['-c', method])
+                    with patch('pybaram.api.io.' + function) as execute:
+                        args.process(args)
+                        execute.assert_called_once_with(*positional, coloring_method=method)
+
     def test_run_ui_defaults_to_tqdm(self):
         args = build_parser().parse_args(['run', 'mesh.pbrm', 'conf.ini'])
 

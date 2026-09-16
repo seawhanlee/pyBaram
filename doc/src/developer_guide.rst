@@ -7,7 +7,12 @@ Overview of Code Structure
 
 Start
 -----
-``pyBaram`` can be executed using the command `pybaram` which is linked to ``__main__.py``. In `run` or `restart` modes, the command calls `process_common` in the :mod:`pybaram.api.simulation` module. Here, the integrator object is initiated, and the run method is called to conduct the simulation.
+The ``pybaram`` console command is linked to :mod:`pybaram.__main__`. The
+``run`` and ``restart`` subcommands load the native mesh, solution, and INI
+files in ``process_run`` or ``process_restart``, then call
+:func:`pybaram.api.simulation.run` or
+:func:`pybaram.api.simulation.restart`. The shared ``_common`` helper selects
+the backend and integrator before starting the simulation loop.
 
 Integrators
 -----------
@@ -91,6 +96,24 @@ solvers in :mod:`pybaram.integrators.relaxation`.
       :inherited-members:
       :private-members:
 
+.. admonition:: Distributed PETSc
+   :class: dropdown
+
+    .. autoclass:: pybaram.integrators.steady.PETSc
+      :members:
+      :undoc-members:
+      :inherited-members:
+      :private-members:
+
+.. admonition:: Rank-local PETSc
+   :class: dropdown
+
+    .. autoclass:: pybaram.integrators.steady.PETScRank
+      :members:
+      :undoc-members:
+      :inherited-members:
+      :private-members:
+
 
 Dual-Time Stepping Integrators
 ******************************
@@ -157,8 +180,32 @@ applies post-processing.
 
 Scalar LU-SGS relaxation uses ``spectral-radius`` as the implicit operator.
 Block LU-SGS relaxation uses ``approx-jacobian`` and can perform inner
-sub-iterations for the block correction. Colored variants use element
-coloring to schedule the sweeps by color levels.
+sub-iterations for the block correction. These solvers operate on a rank-wide
+mixed-element cell graph rather than separate element-type graphs. The graph
+stores cell-to-face adjacency in CSR form so sweeps and implicit-operator
+assembly share the same global rank numbering.
+
+The serial LU-SGS and block LU-SGS variants require the RCM-based
+``rank-order`` layout stored in ``.pbrm`` meshes. Colored variants require the
+``rank-coloring`` layout stored in ``.pbrmc`` meshes and schedule rank-wide
+cells through color barriers. Import and partition physically group cells by
+their selected coloring (``greedy`` or ``smallest-last``); graph-tool is used
+when available, with a Python implementation as the fallback.
+
+Both distributed ``petsc`` and rank-local ``petsc-rank`` use the
+``rank-order`` layout and therefore require ``.pbrm``. Explicit integrators do
+not construct rank-wide implicit storage and can use either native mesh
+format. For dual-time stepping, the relaxation solver selected in
+``[solver-time-relaxation]`` supplies the layout requirement to the owning
+integrator before the system is constructed.
+
+The ``petsc`` relaxation constructs owned rows of one distributed block sparse
+(BSR) matrix. Its global column IDs include cells across MPI interfaces, and a
+collective KSP solves the complete-domain operator. ``petsc-rank`` uses the
+same rank-cell packing and face assembly kernels but creates an independent
+``PETSc.COMM_SELF`` BSR matrix and KSP per rank. Both paths reuse their fixed
+sparsity patterns while rebuilding numerical values and right-hand sides at
+each relaxation step.
 
 .. admonition:: LU-SGS Relaxation
    :class: dropdown
@@ -196,6 +243,24 @@ coloring to schedule the sweeps by color levels.
         :inherited-members:
         :private-members:
 
+.. admonition:: Distributed PETSc Relaxation
+   :class: dropdown
+
+    .. autoclass:: pybaram.integrators.relaxation.PETScGlobalRelaxation
+        :members:
+        :undoc-members:
+        :inherited-members:
+        :private-members:
+
+.. admonition:: Rank-local PETSc Relaxation
+   :class: dropdown
+
+    .. autoclass:: pybaram.integrators.relaxation.PETScRankRelaxation
+        :members:
+        :undoc-members:
+        :inherited-members:
+        :private-members:
+
 
 The hierarchy of ``integrator`` class can be shown as below.
 
@@ -208,6 +273,8 @@ The hierarchy of ``integrator`` class can be shown as below.
                          pybaram.integrators.steady.ColoredLUSGS
                          pybaram.integrators.steady.BlockLUSGS
                          pybaram.integrators.steady.ColoredBlockLUSGS
+                         pybaram.integrators.steady.PETSc
+                         pybaram.integrators.steady.PETScRank
     :parts: 1 
 
 
@@ -225,7 +292,7 @@ The class hierarchy of the ``system`` can be depicted as follows:
                          pybaram.solvers.ranssa.system
                          pybaram.solvers.navierstokes.system
                          pybaram.solvers.euler.system
-    :top-classes: pybaram.solver.base.elements.BaseSystem
+    :top-classes: pybaram.solvers.base.system.BaseSystem
     :parts: 1 
 
 |
@@ -239,7 +306,8 @@ The class hierarchy of the ``system`` can be depicted as follows:
 
         .. automethod:: pybaram.solvers.baseadvec.system.BaseAdvecSystem.rhside
 
-* ``BaseAdvecSystem`` : `rhside` method for advection-diffusion problems, such as Navier-Stokes system.
+* ``BaseAdvecDiffSystem`` : `rhside` method for advection-diffusion problems,
+  such as the Navier-Stokes system.
 
     .. admonition:: rhside for advection-diffusion
       :class: dropdown
@@ -251,11 +319,11 @@ The class hierarchy of the ``system`` can be depicted as follows:
 
 Elements
 ********
-The ``elemenets`` object stores solution and other arrays. It also generates kernels, looping over elements. The class hierarchy can be depicted as follows:
+The ``elements`` object stores solution and other arrays. It also generates kernels, looping over elements. The class hierarchy can be depicted as follows:
 
 .. inheritance-diagram:: pybaram.solvers.navierstokes.elements
                          pybaram.solvers.euler.elements
-    :top-classes: pybaram.solver.base.elements.BaseElements
+    :top-classes: pybaram.solvers.base.elements.BaseElements
     :parts: 1 
 
 * ``BaseElements`` : defines geometry and related properties
@@ -277,7 +345,7 @@ For RANS simulation, class hierarchy can be depicted as follows:
 .. inheritance-diagram:: pybaram.solvers.ranskwsst.elements
                          pybaram.solvers.ranssa.elements
                          pybaram.solvers.ranssaneg.elements
-    :top-classes: pybaram.solver.base.elements.BaseElements
+    :top-classes: pybaram.solvers.base.elements.BaseElements
     :parts: 1
 
 * ``RANSElements`` : common kernels for RANS computation
@@ -302,7 +370,7 @@ The ``inters`` objects generate kernels looping over interfaces. There are three
 .. inheritance-diagram:: pybaram.solvers.base.BaseIntInters
                          pybaram.solvers.base.BaseBCInters
                          pybaram.solvers.base.BaseMPIInters
-    :top-classes: pybaram.solver.base.BaseInters
+    :top-classes: pybaram.solvers.base.inters.BaseInters
     :parts: 1
 
 * ``BaseInters`` : computes geometrical properties and defines view to refer array in ``elements``
@@ -322,7 +390,7 @@ The class hierarchy of internal interfaces can be depicted as follows:
                          pybaram.solvers.ranssaneg.inters.RANSSANegIntInters
                          pybaram.solvers.navierstokes.inters.NavierStokesIntInters
                          pybaram.solvers.euler.inters.EulerIntInters
-    :top-classes: pybaram.solver.base.elements.BaseIntInters
+    :top-classes: pybaram.solvers.base.inters.BaseIntInters
     :parts: 1 
 
 * ``BaseAdvecIntInters`` : common kernel to compute :math:`\Delta U_{fi}`
@@ -348,7 +416,7 @@ The class hierarchy of physical boundary interfaces can be depicted as follows:
                          pybaram.solvers.ranssaneg.inters.RANSSANegBCInters
                          pybaram.solvers.navierstokes.inters.NavierStokesBCInters
                          pybaram.solvers.euler.inters.EulerBCInters
-    :top-classes: pybaram.solver.base.elements.BaseBCInters
+    :top-classes: pybaram.solvers.base.inters.BaseBCInters
     :parts: 1 
 
 The overall structure and role of these classes are the same as internal interfaces. The  ``construct_bc`` method in ``BaseAdvecInters`` compiles the boundary condition function, and specific formulations are implemented in this class. For example, the hierarchy of boundary conditions for Euler equations can be depicted as follows:
@@ -358,6 +426,9 @@ The overall structure and role of these classes are the same as internal interfa
                          pybaram.solvers.euler.inters.EulerSupInBCInters
                          pybaram.solvers.euler.inters.EulerFarInBCInters
                          pybaram.solvers.euler.inters.EulerSubOutPBCInters
+                         pybaram.solvers.euler.inters.EulerSubInvBCInters
+                         pybaram.solvers.euler.inters.EulerSubInpttBCInters
+                         pybaram.solvers.euler.inters.EulerSubOutMdotBCInters
     :top-classes: pybaram.solvers.euler.inters.EulerBCInters
     :parts: 1 
 
@@ -368,10 +439,11 @@ The class hierarchy of MPI interfaces can be depicted as follows:
                          pybaram.solvers.ranssaneg.inters.RANSSANegMPIInters
                          pybaram.solvers.navierstokes.inters.NavierStokesMPIInters
                          pybaram.solvers.euler.inters.EulerMPIInters
-    :top-classes: pybaram.solver.base.elements.BaseMPIInters
+    :top-classes: pybaram.solvers.base.inters.BaseMPIInters
     :parts: 1 
 
-The overall structure and role of these class are the same as internal interfaces.
+The overall structure and roles of these classes are the same as those of
+internal interfaces.
 MPI communication kernels are defined in ``BaseAdvecMPIInters``.
 
 Vertex
@@ -406,15 +478,26 @@ The ``plugin`` modules handle the post-processing after each iteration or a fixe
 
 Backends
 --------
-The :mod:`pybaram.backends` module accelerates the pure Python loop and manages the execution of kernels. Currently, only the ``CPUBackend`` is implemented for serial and parallel computation using CPU. This module provides two main features; generating kernels and handling data types for executions.
+The :mod:`pybaram.backends` module accelerates pure Python loops and manages
+kernel execution. ``CPUBackend`` uses Numba for serial or threaded CPU
+execution, while ``GPUBackend`` compiles and launches CUDA kernels and manages
+host-device transfers. This module provides two main features: generating
+kernels and handling execution data types.
 
 Kernel Compilation
 ******************
-In the ``integrators`` and the ``solvers`` modules, pure Python functions are defined. These functions are compiled as kernels using loop generators in the :mod:`pybaram.backends.cpu.loops` module. The Numba JIT compiler is then called, and the pure Python functions are compiled to construct serial or parallel loops.
+In the ``integrators`` and ``solvers`` modules, kernels are defined as pure
+Python functions. The CPU backend compiles them into serial or parallel loops
+using :mod:`pybaram.backends.cpu.loop`. The CUDA backend translates the same
+loop functions and compiles them as CUDA kernels using
+:mod:`pybaram.backends.cuda.loop`.
 
 Data Types for Execution
 ************************
-Currently, four data types are defined in the :mod:`pybaram.backends.types`.
+Eight execution helper types are defined in :mod:`pybaram.backends.types`.
+They include array and kernel wrappers, three MPI kernel wrappers that
+coordinate packing, host-device copies, and sends for CUDA execution, and the
+MPI request queue.
 
 .. automodule:: pybaram.backends.types
     :members:
@@ -475,26 +558,95 @@ Here, the methods for generating kernels and constructing MPI communications are
 
 Inviscid Flux Kernel
 --------------------
-In :mod:`pybaram.backends.cpu.loop` module, there are two methods: ``make_serial_loop1d`` and ``make_parallel_loop1d``. These methods generate an accelerated kernel from a Python function. A function written in pure Python is compiled using just-in-time compilation with Numba. When ``make_parallel_loop1d`` is used, each thread parallelly executes the loop of this compiled function. Otherwise, the loop of the compiled function is executed sequentially.
+Solver kernels are written once as backend-independent Python functions. As an
+example, :meth:`EulerIntInters._make_flux
+<pybaram.solvers.euler.inters.EulerIntInters._make_flux>` defines an inviscid
+flux function whose first two arguments, ``i_begin`` and ``i_end``, delimit an
+outer cell-face loop. It obtains local-array allocation and compiled flux
+helpers from the active backend, then passes the function and its static arrays
+to ``self.be.make_loop``.
+
+The selected backend determines what happens next::
+
+    EulerIntInters._make_flux
+                |
+                +-- CPU single   -> numba.jit(func)
+                +-- CPU parallel -> parse_loop -> numba.prange -> numba.jit
+                +-- CUDA         -> parse_loop_gpu -> cuda.grid -> cuda.jit
+
+The CPU loop generators are implemented in
+:mod:`pybaram.backends.cpu.loop`. ``make_serial_loop1d`` compiles the original
+function directly with Numba. ``make_parallel_loop1d`` first calls
+:func:`pybaram.backends.parse.parse_loop` to replace the outer ``range`` with
+``numba.prange``, recreates the function with its captured closure variables,
+and compiles it with ``parallel=True``.
 
 .. automodule:: pybaram.backends.cpu.loop
     :members:
     :undoc-members:
 
-As an example, let's consider the ``comm_flux`` function. 
-The ``EulerIntInters`` class in the :mod:`pybaram.solvers.euler.inters` module has ``_make_flux`` method, which generates the kernel to compute numerical flux. The ``comm_flux`` function utilizes a plain for loop structure, which is more similar to the loop structure of C/C++ or Fortran than a Pythonic-style one. Therefore, one can readily adopt a well-developed function from a legacy solver into ``pyBaram``. 
-The allocation of local arrays was hoisted due to limited functionalities for developing local static variables in Numba. Furthermore, the ``_make_flux`` method passes this Python function to the ``make_serial_loop1d`` or ``make_parallel_loop1d`` method of the backend object and finally returns the serialized or parallelized kernel, respectively.
+The CUDA path is implemented by
+:func:`pybaram.backends.cuda.loop.make_cuda_loop`. It uses
+:func:`pybaram.backends.parse.parse_loop_gpu` to replace the outer loop with a
+one-dimensional CUDA grid index and a bounds check. The parser also maps the
+backend-neutral local allocator ``array`` to ``cuda.local.array`` and maps the
+supported NumPy spellings ``np.sqrt``, ``np.abs``, ``np.tanh``, and ``np.exp``
+to CUDA-compatible functions. The transformed function is recreated with its
+closure variables and compiled with ``cuda.jit`` before being launched with
+the configured block size and compute stream.
+
+.. automodule:: pybaram.backends.cuda.loop
+    :members: make_cuda_loop
+    :undoc-members:
+
+The following simplified example shows the outer-loop transformation. A solver
+kernel is authored as::
+
+    def comm_flux(i_begin, i_end, uf):
+        for idx in range(i_begin, i_end):
+            fn = array((nvars,), np.float64)
+            # Compute and store the flux for face idx.
+
+For CPU parallel execution, :func:`~pybaram.backends.parse.parse_loop`
+rewrites the loop as::
+
+    for idx in nb.prange(i_begin, i_end):
+        ...
+
+For CUDA execution, :func:`~pybaram.backends.parse.parse_loop_gpu` rewrites it
+conceptually as::
+
+    idx = cuda.grid(1)
+    if idx < i_end:
+        fn = cuda.local.array((nvars,), np.float64)
+        ...
+
+Functions without an outer loop, such as numerical-flux and Jacobian helpers,
+are compiled as CUDA device functions. ``GPUBackend.compile`` uses
+:func:`~pybaram.backends.parse.parse_simple_gpu` for symbol substitution
+without adding a grid index.
+
+.. automodule:: pybaram.backends.parse
+    :members: parse_loop, parse_loop_gpu, parse_simple_gpu
+
+These transformations deliberately support the kernel form used by pyBaram;
+they are not a general Python-to-CUDA compiler. A loop kernel must expose its
+iteration bounds as the first two arguments and contain an outer
+``range(i_begin, i_end)`` loop that can be found in its source. Kernel source
+must remain available through the standard-library ``inspect`` module, unless the caller supplies it
+explicitly through ``src``. New NumPy operations or allocation spellings must
+also be added to the parser before they can be used by CUDA kernels.
 
 .. autoclass:: pybaram.solvers.euler.inters.EulerIntInters
 
   .. method:: _make_flux
 
-The generated kernel is constructed by `construct_kernels` method of ``BaseAdvecIntInters`` 
-in :mod:`pybaram.solvers.baseadvec.inters`. When this kernel is called, the reconstructed values at the face
-:math:`{U}_f^{\pm}` is used as static argument. 
-Thus, ``Kernel`` data type binds this compiled kernel and the static arguments. 
-When ``Kernel`` object is called, dynamic arguments can be also provided.
-All arguments are parsed, then the compiled kernel is executed.
+The backend loop generator returns a callable together with the arrays bound
+while the kernel was created. ``construct_kernels`` wraps these in
+:class:`pybaram.backends.types.Kernel`, which retains the static arguments.
+When the wrapper is called, it appends any runtime arguments, resolves
+``ArrayBank`` objects to their active arrays, and invokes the compiled CPU or
+CUDA kernel.
 
 .. autoclass:: pybaram.solvers.euler.inters.BaseAdvecIntInters
 
@@ -504,7 +656,13 @@ Non-blocking Send/Receive
 -------------------------
 ``pyBaram`` exploits the ``mpi4py`` package for MPI communication. Non-blocking communications are employed and overlapped with computing kernels. These methods are implemented in the ``MPIInters`` class.
 
-In the `construct_kernels` method, non-blocking send and receive kernels, along with their requests, are constructed using the `_make_send` and `_make_recv` methods. Buffers are passed to these methods, and the `_sendrecv`` method is invoked. In this method, the `start` function is returned. When this function is called with a `Queue` instance in `rhside`, the MPI request for this communication is registered in the `Queue` instance, and the non-blocking communication starts. This communication is finalized when the `sync` method in the `Queue` instance is called.
+In the ``construct_kernels`` method, non-blocking send and receive kernels,
+along with their requests, are constructed using the ``_make_send`` and
+``_make_recv`` methods. Buffers are passed to these methods, and the
+``_sendrecv`` method is invoked. This method returns the ``start`` function.
+When called with a ``Queue`` instance from ``rhside``, it registers the MPI
+request with the queue and starts the non-blocking communication. The
+communication is finalized when the queue's ``sync`` method is called.
 
 .. autoclass:: pybaram.solvers.baseadvec.inters.BaseAdvecMPIInters
 
@@ -522,3 +680,72 @@ In the `construct_kernels` method, non-blocking send and receive kernels, along 
     .. method:: register
 
     .. method:: sync
+
+CUDA Stream Overlap
+*******************
+For the CUDA backend, the ``construct_kernels`` method also creates ``pack`` and
+``unpack`` kernels for transferring MPI-interface data between device arrays
+and pinned host buffers. The ``pack`` kernel first gathers the interface data
+into a device send buffer on the compute stream. A CUDA event then makes the
+copy stream wait for packing to complete before starting the device-to-host
+(D2H) transfer. The MPI send is started only after the host send buffer is
+ready, while rank-local kernels can continue executing on the compute stream.
+
+After the non-blocking MPI receive has completed, the ``unpack`` kernel reflects
+the received buffer into backend-local storage. For CUDA, it first starts a
+host-to-device (H2D) transfer on the copy stream. Another CUDA event makes the
+compute stream wait for this transfer before the received values are used by
+MPI-interface kernels. These event dependencies preserve the required ``pack
+-> D2H -> MPI send`` and ``MPI receive -> H2D -> MPI-interface processing``
+ordering without synchronizing the entire device.
+
+When multiple node-local MPI ranks are used, the compute and copy operations
+use separate CUDA streams, allowing rank-local computation to overlap with
+host-device transfers and MPI communication. With a single node-local MPI
+rank, both operations use the same stream and this stream-level overlap is
+disabled.
+
+The following simplified scheduling sequence illustrates this process::
+
+    self.eles.compute_fpts()
+
+    if self.mpiint:
+        self.mpiint.recv(q)       # Post the persistent MPI receive
+        self.mpiint.pack()        # Pack on the compute stream, then start D2H
+
+    # These kernels can overlap with D2H on the copy stream.
+    self.iint.compute_delu()
+    self.bint.compute_delu()
+
+    if self.mpiint:
+        self.mpiint.send(q)       # Wait for D2H, then start the MPI send
+        q.sync()                  # Wait for the MPI requests
+        self.mpiint.unpack()      # Start H2D on the copy stream
+        self.mpiint.compute_delu()
+
+
+Module Index
+============
+The following modules form the main extension points described in this guide.
+
+.. py:module:: pybaram.__main__
+.. py:module:: pybaram.backends
+.. py:module:: pybaram.integrators
+.. py:module:: pybaram.integrators.unsteady
+.. py:module:: pybaram.integrators.steady
+.. py:module:: pybaram.integrators.dts
+.. py:module:: pybaram.integrators.relaxation
+.. py:module:: pybaram.solvers
+.. py:module:: pybaram.solvers.base.inters
+.. py:module:: pybaram.solvers.baseadvec
+.. py:module:: pybaram.solvers.baseadvec.inters
+.. py:module:: pybaram.solvers.baseadvec.elements
+.. py:module:: pybaram.solvers.baseadvec.vertex
+.. py:module:: pybaram.solvers.euler.inters
+.. py:module:: pybaram.solvers.euler.rsolvers
+.. py:module:: pybaram.solvers.navierstokes
+.. py:module:: pybaram.solvers.navierstokes.visflux
+.. py:module:: pybaram.solvers.rans
+.. py:module:: pybaram.solvers.ranssa
+.. py:module:: pybaram.solvers.ranssaneg
+.. py:module:: pybaram.solvers.ranskwsst

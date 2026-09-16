@@ -83,7 +83,7 @@ class BaseUnsteadyIntegrator(BaseIntegrator):
         self.sys.timestep(self.cfl, self._curr_idx)
 
         # Get minimum over whole cells
-        dt = min(self.sys.eles.dt.min())
+        dt = min(self.be.min_arrays(self.sys.eles.dt))
         dtmin = self._comm.allreduce(dt, op=MPI.MIN)
 
         # Adjust time step for target time

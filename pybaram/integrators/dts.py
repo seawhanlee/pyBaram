@@ -247,16 +247,19 @@ class BDFDTSIntegrator(BaseDTSIntegrator):
                 _c[0]/dt
             )
 
-        self._set_active_order(min(self.piter + 1, self._target_order))
+        order = min(self.piter + 1, self._target_order)
+        self._source, self._add_source, a0 = self._stages[order]
+        self.relaxation.build(a0)
+        self._active_order = order
 
     def _set_active_order(self, order):
         if order == self._active_order:
             return
 
-        # The BDF diagonal coefficient changes with order, so relaxation
-        # kernels must be rebuilt when the active BDF order changes.
+        # The BDF diagonal coefficient is a runtime kernel argument.  Update
+        # only its value so relaxation kernels and work arrays are reused.
         self._source, self._add_source, a0 = self._stages[order]
-        self.relaxation.build(a0)
+        self.relaxation.set_a0(a0)
         self._active_order = order
 
     def step(self, t):

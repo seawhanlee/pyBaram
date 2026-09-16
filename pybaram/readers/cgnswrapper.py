@@ -42,6 +42,7 @@ class CGNSWrapper(object):
 
         self._probe_type(lib)
         cgns_int = self._cgns_int
+        cgsize_t = self._cgsize_t
 
         # cg_open
         lib.cg_open.argtypes = [c_char_p, cgns_int, POINTER(cgns_int)]
@@ -66,7 +67,7 @@ class CGNSWrapper(object):
 
         # cg_zone_read
         lib.cg_zone_read.argtypes = [cgns_int, cgns_int, cgns_int, c_char_p,
-                                     POINTER(cgns_int)]
+                                     POINTER(cgsize_t)]
         lib.cg_zone_read.errcheck = self._errcheck
 
         # cg_zone_type
@@ -75,8 +76,8 @@ class CGNSWrapper(object):
 
         # cg_coord_read
         lib.cg_coord_read.argtypes = [
-            cgns_int, cgns_int, cgns_int, c_char_p, cgns_int, POINTER(cgns_int),
-            POINTER(cgns_int), c_void_p
+            cgns_int, cgns_int, cgns_int, c_char_p, cgns_int, POINTER(cgsize_t),
+            POINTER(cgsize_t), c_void_p
         ]
         lib.cg_coord_read.errcheck = self._errcheck
 
@@ -87,14 +88,14 @@ class CGNSWrapper(object):
         # cg_boco_info
         lib.cg_boco_info.argtypes = [
             cgns_int, cgns_int, cgns_int, cgns_int, c_char_p, POINTER(cgns_int),
-            POINTER(cgns_int), POINTER(cgns_int), POINTER(cgns_int),
-            POINTER(cgns_int), POINTER(cgns_int), POINTER(cgns_int)
+            POINTER(cgns_int), POINTER(cgsize_t), POINTER(cgns_int),
+            POINTER(cgsize_t), POINTER(cgns_int), POINTER(cgns_int)
         ]
         lib.cg_boco_info.errcheck = self._errcheck
 
         # cg_boco_read
         lib.cg_boco_read.argtypes = [cgns_int, cgns_int, cgns_int, cgns_int,
-                                     POINTER(cgns_int), c_void_p]
+                                     POINTER(cgsize_t), c_void_p]
         lib.cg_boco_read.errcheck = self._errcheck
 
         # cg_nsections
@@ -104,13 +105,13 @@ class CGNSWrapper(object):
         # cg_section_read
         lib.cg_section_read.argtypes = [
             cgns_int, cgns_int, cgns_int, cgns_int, c_char_p, POINTER(cgns_int),
-            POINTER(cgns_int), POINTER(cgns_int), POINTER(cgns_int), POINTER(cgns_int)
+            POINTER(cgsize_t), POINTER(cgsize_t), POINTER(cgns_int), POINTER(cgns_int)
         ]
         lib.cg_section_read.errcheck = self._errcheck
 
         # cg_ElementDataSize
         lib.cg_ElementDataSize.argtypes = [cgns_int, cgns_int, cgns_int, cgns_int,
-                                           POINTER(cgns_int)]
+                                           POINTER(cgsize_t)]
         lib.cg_ElementDataSize.errcheck = self._errcheck
 
         # cg_elements_read
@@ -142,12 +143,13 @@ class CGNSWrapper(object):
         prec = cgns_int_np([0])
         err = lib.cg_precision(fp, prec.ctypes.data)
         
-        # Assign cgns_int type
+        # CGNS enums, counts and handles are C int; mesh indices use cgsize_t.
+        self._cgns_int = c_int
         if err != 0 or prec[0] != 32:
-            self._cgns_int = c_int64
+            self._cgsize_t = c_int64
             self.int_np = np.int64
         else:
-            self._cgns_int = c_int
+            self._cgsize_t = c_int
             self.int_np = np.int32
 
         # Close and delete null cgns file
@@ -180,7 +182,7 @@ class CGNSWrapper(object):
     def zone_read(self, base, idx):
         zonetype = self._cgns_int()
         name = create_string_buffer(32)
-        size = (self._cgns_int * 3)()
+        size = (self._cgsize_t * 3)()
 
         self.lib.cg_zone_read(base['file'], base['idx'], idx + 1, name, size)
 
@@ -194,8 +196,8 @@ class CGNSWrapper(object):
                 'size': list(size)}
 
     def coord_read(self, zone, name, x):
-        i = self._cgns_int(1)
-        j = self._cgns_int(zone['size'][0])
+        i = self._cgsize_t(1)
+        j = self._cgsize_t(zone['size'][0])
 
         file = zone['base']['file']
         base = zone['base']['idx']
@@ -230,9 +232,9 @@ class CGNSWrapper(object):
         name = create_string_buffer(32)
         bocotype = self._cgns_int()
         ptset_type = self._cgns_int()
-        npnts = self._cgns_int()
+        npnts = self._cgsize_t()
         normalindex = (self._cgns_int * 3)()
-        normallistsize = self._cgns_int()
+        normallistsize = self._cgsize_t()
         normaldatatype = self._cgns_int()
         ndataset = self._cgns_int()
 
@@ -241,14 +243,19 @@ class CGNSWrapper(object):
             normalindex, normallistsize, normaldatatype, ndataset
         )
 
-        val = (self._cgns_int * npnts.value)()
+        val = (self._cgsize_t * npnts.value)()
         self.lib.cg_boco_read(file, base, zone, idx + 1, val, None)
 
         if ptset_type.value in [self.PointRange, self.ElementRange]:
             bc_range = tuple(val)
-            bc_list = list(range(bc_range[0], bc_range[1]+1))
+            if len(bc_range) != 2 or bc_range[1] < bc_range[0]:
+                raise RuntimeError('Invalid BC range')
+            bc_list = np.arange(bc_range[0], bc_range[1] + 1,
+                                dtype=self.int_np)
         elif ptset_type.value in [self.PointList, self.ElementList]:
-            bc_list = list(val)
+            bc_list = np.asarray(val, dtype=self.int_np)
+            if not len(bc_list):
+                raise RuntimeError('Empty BC list')
             bc_range = min(bc_list), max(bc_list)
         else:
             raise RuntimeError('Only range/list BC is supported')
@@ -272,8 +279,9 @@ class CGNSWrapper(object):
         zidx = zone['idx']
 
         name = create_string_buffer(32)
-        etype, start, end, nbdry = self._cgns_int(), self._cgns_int(), self._cgns_int(), self._cgns_int()
-        pflag, cdim = self._cgns_int(), self._cgns_int()
+        etype = self._cgns_int()
+        start, end, cdim = self._cgsize_t(), self._cgsize_t(), self._cgsize_t()
+        nbdry, pflag = self._cgns_int(), self._cgns_int()
 
         self.lib.cg_section_read(
             file, base, zidx, idx + 1, name, etype, start, end, nbdry, pflag

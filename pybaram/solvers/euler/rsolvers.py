@@ -639,11 +639,17 @@ def make_ausmzc(cplargs):
         mtr = vtr / cr
         mtm = 0.5*(mtl + mtr)
 
-        # Weighted average
+        # Zonal sensor
         k1, k2 = 15, 0.45
         z = 0.5*(np.tanh(k1*(mtm-k2))+1.0)
-        fc = 1 - (1 - min(ul[0]/ur[0], ur[0]/ul[0])**3)*min(pl/pr,pr/pl)**3
-        z *= fc
+
+        # Shear/Contact sensor
+        k3, k4 = 50, 0.95
+        pratio3 = min(pl/pr,pr/pl)**3
+        rratio6 = min(ul[0]/ur[0], ur[0]/ul[0])**6
+        fr = 0.5*(np.tanh(k3*(rratio6-k4))+1.0)
+        s = 1 - (1 - fr)*pratio3
+        z *= s
 
         # Specific enthalpy and contra velocity for left / right
         hl = (ul[nvars-1] + pl)/ul[0]

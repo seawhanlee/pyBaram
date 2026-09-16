@@ -62,6 +62,12 @@ inheritance_node_attrs = dict(
 inheritance_edge_attrs = dict(
     penwidth='0.3')
 
+# Inheritance diagrams create links for every discovered base class, including
+# internal classes that intentionally do not have standalone API entries.
+nitpick_ignore_regex = [
+    ('py:class', r'pybaram\.(?:integrators|solvers|plugins)\..*'),
+]
+
 graphviz_output_format = 'svg'
 
 # -- Options for HTML output -------------------------------------------------

@@ -5,12 +5,13 @@ from pybaram.utils.nb import dot
 from pybaram.utils.np import eps
 
 import functools as fc
-import numpy as np
 
 
 class RANSKWSSTFluidElements(ViscousFluidElements):
     name = 'rans-kwsst'
     nturbvars = 2
+    production_kind = 'strain-rate'
+    production_limiter = 10.0
 
     @property
     def auxvars(self):
@@ -32,14 +33,14 @@ class RANSKWSSTFluidElements(ViscousFluidElements):
 
     @fc.lru_cache()
     def mut_container(self):
-        from pybaram.solvers.rans.turbulent import make_vorticity
+        from pybaram.solvers.rans.turbulent import make_strain_rate_mag
         from pybaram.solvers.ranskwsst.turbulent import make_blendingF2
         
         cplargs = {'ndims' : self.ndims, 'nvars' : self.nvars, 
                     **self._turb_coeffs}
 
         # Functions
-        _vorticity = make_vorticity(self.be, cplargs)
+        _strain_rate = make_strain_rate_mag(self.be, cplargs)
         _f2 = make_blendingF2(self.be, cplargs)
 
         a1 = self._turb_coeffs['a1']
@@ -49,11 +50,11 @@ class RANSKWSSTFluidElements(ViscousFluidElements):
             w = uc[-1] / uc[0]
             rk = uc[-2]
 
-            omega = _vorticity(uc, gc)
+            strain = _strain_rate(uc, gc)
             f2 = _f2(uc, mu, d)
 
             # Turbulence viscosity
-            mut = a1*rk / max(a1*w, f2*omega)
+            mut = a1*rk / max(a1*w, f2*strain)
 
             # Limit mut (non-zero, below muf*limit)
             return min(max(eps, mut), mut_max)
@@ -74,6 +75,7 @@ class RANSKWSSTFluidElements(ViscousFluidElements):
         return self.be.compile(tflux)
 
     def turb_src_container(self):
+        from pybaram.solvers.rans.turbulent import make_strain_rate_mag
         from pybaram.solvers.rans.turbulent import make_vorticity
         from pybaram.solvers.ranskwsst.turbulent import make_blendingF1
 
@@ -81,11 +83,18 @@ class RANSKWSSTFluidElements(ViscousFluidElements):
                     **self._turb_coeffs}
 
         # Functions
-        _vorticity = make_vorticity(self.be, cplargs)
+        if self.production_kind == 'strain-rate':
+            _production_rate = make_strain_rate_mag(self.be, cplargs)
+        elif self.production_kind == 'vorticity':
+            _production_rate = make_vorticity(self.be, cplargs)
+        else:
+            raise ValueError(f"Wrong SST production kind: {self.production_kind}")
+
         _f1 = make_blendingF1(self.be, cplargs)
 
         # Constants
         nvars, ndims = self.nvars, self.ndims
+        production_limiter = self.production_limiter
         betast = self._turb_coeffs['betast']
         beta1, beta2 = self._turb_coeffs['beta1'], self._turb_coeffs['beta2']
         tgamma1, tgamma2 = self._turb_coeffs['tgamma1'], self._turb_coeffs['tgamma2']
@@ -105,18 +114,16 @@ class RANSKWSSTFluidElements(ViscousFluidElements):
                 w_x = (gc[i][nvars-1] - w*rho_x)/rho
                 kwcross += k_x*w_x
 
-            # Vorticity
-            omega = _vorticity(uc, gc)
-
-            # SST-Vm
-            bigP = mut*omega**2
+            # SST-2003m production term
+            strain_or_vort = _production_rate(uc, gc)
+            bigP = mut*strain_or_vort**2
 
             # Blending function
             f1 = _f1(uc, gc, mu, d)
             tgamma = f1*tgamma1 + (1-f1)*tgamma2
             beta = f1*beta1 + (1-f1)*beta2
 
-            prodk = min(bigP, 20*betast*rho*w*k)
+            prodk = min(bigP, production_limiter*betast*rho*w*k)
             ddestk = betast*w 
             destk = ddestk*rho*k
 
@@ -156,6 +163,15 @@ class RANSKWSSTFluidElements(ViscousFluidElements):
         return self.be.compile(fix_nonPhy)
 
 
+class RANSKWSSTV2003mFluidElements(RANSKWSSTFluidElements):
+    name = 'rans-kwsst-v2003m'
+    production_kind = 'vorticity'
+
+
+class RANSKWSST2003mFluidElements(RANSKWSSTFluidElements):
+    name = 'rans-kwsst-2003m'
+
+
 class RANSKWSSTElements(RANSElements, RANSKWSSTFluidElements):
     def __init__(self, be, cfg, name, eles):
         super().__init__(be, cfg, name, eles)
@@ -172,22 +188,13 @@ class RANSKWSSTElements(RANSElements, RANSKWSSTFluidElements):
         cfg.get(sect, 'betast', '0.09')
         cfg.get(sect, 'kappa', '0.41')
         cfg.get(sect, 'a1', '0.31')
+        cfg.get(sect, 'tgamma1', '5/9')
+        cfg.get(sect, 'tgamma2', '0.44')
 
         # Turbulent viscosity
         cfg.get(sect, 'mut_limit', '1e5')
         
         self._turb_coeffs = cfg.items(sect)
-
-        # Compute gamma1, gamma2
-        beta1 = self._turb_coeffs['beta1']
-        beta2 = self._turb_coeffs['beta2']
-        betast = self._turb_coeffs['betast']
-        kappa = self._turb_coeffs['kappa']
-        sigmaw1 = self._turb_coeffs['sigmaw1']
-        sigmaw2 = self._turb_coeffs['sigmaw2']
-
-        self._turb_coeffs['tgamma1'] = beta1/betast - sigmaw1*kappa**2/np.sqrt(betast)
-        self._turb_coeffs['tgamma2'] = beta2/betast - sigmaw2*kappa**2/np.sqrt(betast)
 
     def _make_post(self):
         # Get post-process function
@@ -273,3 +280,12 @@ class RANSKWSSTElements(RANSElements, RANSKWSSTFluidElements):
             A[1][1] += dsrc[nvars-1]
 
         return self.be.compile(_dsrc)
+
+
+class RANSKWSSTV2003mElements(RANSKWSSTElements, RANSKWSSTV2003mFluidElements):
+    name = 'rans-kwsst-v2003m'
+    production_kind = 'vorticity'
+
+
+class RANSKWSST2003mElements(RANSKWSSTElements, RANSKWSST2003mFluidElements):
+    name = 'rans-kwsst-2003m'

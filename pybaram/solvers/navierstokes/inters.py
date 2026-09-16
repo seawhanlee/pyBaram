@@ -19,13 +19,15 @@ class NavierStokesIntInters(BaseAdvecDiffIntInters):
         fpts, gradf = self._fpts, self._gradf
 
         if impl_op == 'spectral-radius':
-            # Collect array to save spectral raidus
-            fspr = tuple(cell.fspr for cell in elemap.values())
-            self.compute_flux = Kernel(*self._make_flux(impl_op), muf, gradf, fpts, fspr)
+            self.compute_flux = Kernel(
+                *self._make_flux(impl_op), muf, gradf, fpts,
+                self.rank_fspr
+            )
         elif impl_op == 'approx-jacobian':
-            # Collect array to save Jacobian
-            fjmat = tuple(cell.jmat for cell in elemap.values())
-            self.compute_flux = Kernel(*self._make_flux(impl_op), muf, gradf, fpts, fjmat)
+            self.compute_flux = Kernel(
+                *self._make_flux(impl_op), muf, gradf, fpts,
+                self.rank_jmat
+            )
         else:
             self.compute_flux = Kernel(*self._make_flux(impl_op), muf, gradf, fpts)
 
@@ -36,6 +38,7 @@ class NavierStokesIntInters(BaseAdvecDiffIntInters):
         lidx = self.lidx
         ridx = self.ridx
         nf, sf = self.vec_snorm, self.mag_snorm
+        rcp_dx = self.rcp_dx
         is_axi = getattr(self.ele0, '_is_axisymmetric', False)
         rf = self.axisymmetric_radius if is_axi else self.mag_snorm
 
@@ -61,12 +64,10 @@ class NavierStokesIntInters(BaseAdvecDiffIntInters):
         visflux = make_visflux(self.be, cplargs)
 
         if impl_op == 'spectral-radius':
-            # reciprocal of distance between two cells
-            rcp_dx = self.rcp_dx
-
             wave_speed = self.ele0.make_wave_speed()
 
-            def comm_flux_spr(i_begin, i_end, lidx, ridx, nf, sf, rf, rcp_dx, muf, gradf, uf, lam):
+            def comm_flux_spr(i_begin, i_end, lidx, ridx, nf, sf, rf,
+                              rcp_dx, face_ids, muf, gradf, uf, lam):
                 for idx in range(i_begin, i_end):
                     fn = array((nfvars,), np.float64)
                     um = array((nfvars,), np.float64)
@@ -103,15 +104,17 @@ class NavierStokesIntInters(BaseAdvecDiffIntInters):
 
                     # Compute spectral radius on face
                     lami = max(laml, lamr)
-                    lam[lti][lfi, lei] = lami
-                    lam[rti][rfi, rei] = lami
+                    lam[face_ids[idx]] = lami
 
                     for jdx in range(nfvars):
                         # Save it at left and right solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
                         uf[rti][rfi, jdx, rei] = -fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux_spr, lidx, ridx, nf, sf, rf, rcp_dx)
+            return self.be.make_loop(
+                self.nfpts, comm_flux_spr, lidx, ridx, nf, sf, rf,
+                rcp_dx, self.rank_face_ids
+            )
         elif impl_op == 'approx-jacobian':
             from pybaram.solvers.euler.jacobian import make_convective_jacobian
             from pybaram.solvers.navierstokes.jacobian import get_viscous_jacobian
@@ -119,15 +122,13 @@ class NavierStokesIntInters(BaseAdvecDiffIntInters):
             vistype = self.cfg.get('solver-time-integrator', 'visflux-jacobian', 'tlns')
 
             # Get Jacobian functions
-            pos_jacobian = make_convective_jacobian(self.be, cplargs, 'positive')
-            neg_jacobian = make_convective_jacobian(self.be, cplargs, 'negative')
-            vis_pos_jacobian = get_viscous_jacobian(vistype, self.be, cplargs, 'positive')
-            vis_neg_jacobian = get_viscous_jacobian(vistype, self.be, cplargs, 'negative')
+            pos_conv_jac = make_convective_jacobian(self.be, cplargs, 'positive')
+            neg_conv_jac = make_convective_jacobian(self.be, cplargs, 'negative')
+            pos_visc_jac = get_viscous_jacobian(vistype, self.be, cplargs, 'positive')
+            neg_visc_jac = get_viscous_jacobian(vistype, self.be, cplargs, 'negative')
 
-            # reciprocal of distance between two cells
-            rcp_dx = self.rcp_dx
-
-            def comm_flux_ajac(i_begin, i_end, lidx, ridx, nf, sf, rf, rcp_dx, muf, gradf, uf, jmats):
+            def comm_flux_ajac(i_begin, i_end, lidx, ridx, nf, sf, rf,
+                               rcp_dx, face_ids, muf, gradf, uf, jmat):
                 for idx in range(i_begin, i_end):
                     fn = array((nfvars,), np.float64)
                     um = array((nfvars,), np.float64)
@@ -164,26 +165,28 @@ class NavierStokesIntInters(BaseAdvecDiffIntInters):
 
                     # Compute Jacobian matrix on surface
                     # based on left/right cell
-                    pos_jacobian(ul, nfi, ap)
-                    neg_jacobian(ur, nfi, am)
+                    pos_conv_jac(ul, nfi, ap)
+                    neg_conv_jac(ur, nfi, am)
 
-                    vis_pos_jacobian(ul, nfi, ap, mu, rcp_dxi)
-                    vis_neg_jacobian(ur, nfi, am, mu, rcp_dxi)
+                    pos_visc_jac(ul, nfi, ap, mu, 0.0, rcp_dxi)
+                    neg_visc_jac(ur, nfi, am, mu, 0.0, rcp_dxi)
 
                     # Compute approximate Jacobian on face
                     for row in range(nfvars):
                         for col in range(nfvars):
-                            jmats[lti][0, row, col, lfi, lei] = ap[row][col]
-                            jmats[lti][1, row, col, lfi, lei] = am[row][col]
-                            jmats[rti][0, row, col, rfi, rei] = -am[row][col]
-                            jmats[rti][1, row, col, rfi, rei] = -ap[row][col]
+                            face = face_ids[idx]
+                            jmat[0, row, col, face] = ap[row][col]
+                            jmat[1, row, col, face] = am[row][col]
 
                     for jdx in range(nfvars):
                         # Save it at left and right solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
                         uf[rti][rfi, jdx, rei] = -fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux_ajac, lidx, ridx, nf, sf, rf, rcp_dx)
+            return self.be.make_loop(
+                self.nfpts, comm_flux_ajac, lidx, ridx, nf, sf, rf,
+                rcp_dx, self.rank_face_ids
+            )
         else:
             def comm_flux(i_begin, i_end, lidx, ridx, nf, sf, rf, muf, gradf, uf):
                 for idx in range(i_begin, i_end):
@@ -235,13 +238,15 @@ class NavierStokesMPIInters(BaseAdvecDiffMPIInters):
         rhs = self._rhs
 
         if impl_op == 'spectral-radius':
-            # Collect array to save spectral raidus
-            fspr = tuple(cell.fspr for cell in elemap.values())
-            self.compute_flux = Kernel(*self._make_flux(impl_op), muf, gradf, rhs, fpts, fspr)
+            self.compute_flux = Kernel(
+                *self._make_flux(impl_op), muf, gradf, rhs, fpts,
+                self.rank_fspr
+            )
         elif impl_op == 'approx-jacobian':
-            # Collect array to save Jacobian
-            fjmat = tuple(cell.jmat for cell in elemap.values())
-            self.compute_flux = Kernel(*self._make_flux(impl_op), muf, gradf, rhs, fpts, fjmat)
+            self.compute_flux = Kernel(
+                *self._make_flux(impl_op), muf, gradf, rhs, fpts,
+                self.rank_jmat
+            )
         else:
             self.compute_flux = Kernel(*self._make_flux(impl_op), muf, gradf, rhs, fpts)
 
@@ -249,6 +254,7 @@ class NavierStokesMPIInters(BaseAdvecDiffMPIInters):
         ndims, nfvars = self.ndims, self.nfvars
         lidx = self.lidx
         nf, sf = self.vec_snorm, self.mag_snorm
+        rcp_dx = self.rcp_dx
         is_axi = getattr(self.ele0, '_is_axisymmetric', False)
         rf = self.axisymmetric_radius if is_axi else self.mag_snorm
 
@@ -274,13 +280,11 @@ class NavierStokesMPIInters(BaseAdvecDiffMPIInters):
         visflux = make_visflux(self.be, cplargs)
 
         if impl_op == 'spectral-radius':
-            # reciprocal of distance between two cells
-            rcp_dx = self.rcp_dx
-
             # Get wave speed function
             wave_speed = self.ele0.make_wave_speed()
 
-            def comm_flux_spr(i_begin, i_end, lidx, nf, sf, rf, rcp_dx, muf, gradf, rhs, uf, lam):
+            def comm_flux_spr(i_begin, i_end, lidx, nf, sf, rf, rcp_dx,
+                              face_ids, muf, gradf, rhs, uf, lam):
                 for idx in range(i_begin, i_end):
                     fn = array((nfvars,), np.float64)
                     um = array((nfvars,), np.float64)
@@ -312,13 +316,16 @@ class NavierStokesMPIInters(BaseAdvecDiffMPIInters):
 
                     # Compute spectral radius on face
                     lami = wave_speed(ul, nfi, rcp_dxi, mu)
-                    lam[lti][lfi, lei] = lami
+                    lam[face_ids[idx]] = lami
 
                     for jdx in range(nfvars):
                         # Save it at left solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux_spr, lidx, nf, sf, rf, rcp_dx)
+            return self.be.make_loop(
+                self.nfpts, comm_flux_spr, lidx, nf, sf, rf, rcp_dx,
+                self.rank_face_ids
+            )
         elif impl_op == 'approx-jacobian':
             from pybaram.solvers.euler.jacobian import make_convective_jacobian
             from pybaram.solvers.navierstokes.jacobian import get_viscous_jacobian
@@ -326,13 +333,11 @@ class NavierStokesMPIInters(BaseAdvecDiffMPIInters):
             vistype = self.cfg.get('solver-time-integrator', 'visflux-jacobian', 'tlns')
 
             # Get Jacobian functions
-            pos_jacobian = make_convective_jacobian(self.be, cplargs, 'positive')
-            vis_jacobian = get_viscous_jacobian(vistype, self.be, cplargs)
+            com_conv_jac = make_convective_jacobian(self.be, cplargs, 'positive')
+            com_visc_jac = get_viscous_jacobian(vistype, self.be, cplargs)
 
-            # reciprocal of distance between two cells
-            rcp_dx = self.rcp_dx
-
-            def comm_flux_ajac(i_begin, i_end, lidx, nf, sf, rf, rcp_dx, muf, gradf, rhs, uf, jmats):
+            def comm_flux_ajac(i_begin, i_end, lidx, nf, sf, rf, rcp_dx,
+                               face_ids, muf, gradf, rhs, uf, jmat):
                 for idx in range(i_begin, i_end):
                     fn = array((nfvars,), np.float64)
                     um = array((nfvars,), np.float64)
@@ -366,19 +371,22 @@ class NavierStokesMPIInters(BaseAdvecDiffMPIInters):
                         visflux(um, gf, nfi, mu, fn)
 
                     # Compute Jacobian matrix on surface
-                    pos_jacobian(ul, nfi, ap)
-                    vis_jacobian(ul, nfi, ap, mu, rcp_dxi)
+                    com_conv_jac(ul, nfi, ap)
+                    com_visc_jac(ul, nfi, ap, mu, 0.0, rcp_dxi)
 
                     # Compute approximate Jacobian on face
                     for row in range(nfvars):
                         for col in range(nfvars):
-                            jmats[lti][0, row, col, lfi, lei] = ap[row][col]
+                            jmat[0, row, col, face_ids[idx]] = ap[row][col]
 
                     for jdx in range(nfvars):
                         # Save it at left solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux_ajac, lidx, nf, sf, rf, rcp_dx)
+            return self.be.make_loop(
+                self.nfpts, comm_flux_ajac, lidx, nf, sf, rf, rcp_dx,
+                self.rank_face_ids
+            )
         else:        
             def comm_flux(i_begin, i_end, lidx, nf, sf, rf, muf, gradf, rhs, uf):
                 for idx in range(i_begin, i_end):
@@ -429,13 +437,15 @@ class NavierStokesBCInters(BaseAdvecDiffBCInters):
         fpts, gradf = self._fpts, self._gradf
 
         if impl_op == 'spectral-radius':
-            # Collect array to save spectral raidus
-            fspr = tuple(cell.fspr for cell in elemap.values())
-            self.compute_flux = Kernel(*self._make_flux(impl_op), muf, gradf, fpts, fspr)
+            self.compute_flux = Kernel(
+                *self._make_flux(impl_op), muf, gradf, fpts,
+                self.rank_fspr
+            )
         elif impl_op == 'approx-jacobian':
-            # Collect array to save Jacobian
-            fjmat = tuple(cell.jmat for cell in elemap.values())
-            self.compute_flux = Kernel(*self._make_flux(impl_op), muf, gradf, fpts, fjmat)
+            self.compute_flux = Kernel(
+                *self._make_flux(impl_op), muf, gradf, fpts,
+                self.rank_jmat
+            )
         else:
             self.compute_flux = Kernel(*self._make_flux(impl_op), muf, gradf, fpts)
 
@@ -443,6 +453,7 @@ class NavierStokesBCInters(BaseAdvecDiffBCInters):
         ndims, nfvars = self.ndims, self.nfvars
         lidx = self.lidx
         nf, sf = self.vec_snorm, self.mag_snorm
+        rcp_dx = self.rcp_dx
         is_axi = getattr(self.ele0, '_is_axisymmetric', False)
         rf = self.axisymmetric_radius if is_axi else self.mag_snorm
 
@@ -470,12 +481,10 @@ class NavierStokesBCInters(BaseAdvecDiffBCInters):
         # Get bc function (`self.bc` was defined at `baseadvec.inters`)
         bc = self.bc
         if impl_op == 'spectral-radius':
-            # reciprocal of distance between two cells
-            rcp_dx = self.rcp_dx
-
             wave_speed = self.ele0.make_wave_speed()
             
-            def comm_flux_spr(i_begin, i_end, lidx, nf, sf, rf, rcp_dx, muf, gradf, uf, lam):
+            def comm_flux_spr(i_begin, i_end, lidx, nf, sf, rf, rcp_dx,
+                              face_ids, muf, gradf, uf, lam):
                 for idx in range(i_begin, i_end):
                     ur = array((nfvars,), np.float64)
                     um = array((nfvars,), np.float64)
@@ -511,13 +520,16 @@ class NavierStokesBCInters(BaseAdvecDiffBCInters):
 
                     # Compute spectral radius on face
                     lami = wave_speed(ul, nfi, rcp_dxi, mu)
-                    lam[lti][lfi, lei] = lami
+                    lam[face_ids[idx]] = lami
 
                     for jdx in range(nfvars):
                         # Save it at left solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux_spr, lidx, nf, sf, rf, rcp_dx)
+            return self.be.make_loop(
+                self.nfpts, comm_flux_spr, lidx, nf, sf, rf, rcp_dx,
+                self.rank_face_ids
+            )
         elif impl_op == 'approx-jacobian':
             from pybaram.solvers.euler.jacobian import make_convective_jacobian
             from pybaram.solvers.navierstokes.jacobian import get_viscous_jacobian
@@ -525,13 +537,11 @@ class NavierStokesBCInters(BaseAdvecDiffBCInters):
             vistype = self.cfg.get('solver-time-integrator', 'visflux-jacobian', 'tlns')
 
             # Get Jacobian functions
-            pos_jacobian = make_convective_jacobian(self.be, cplargs, 'positive')
-            vis_jacobian = get_viscous_jacobian(vistype, self.be, cplargs)
+            com_conv_jac = make_convective_jacobian(self.be, cplargs, 'positive')
+            com_visc_jac = get_viscous_jacobian(vistype, self.be, cplargs)
 
-            # reciprocal of distance between two cells
-            rcp_dx = self.rcp_dx
-
-            def comm_flux_ajac(i_begin, i_end, lidx, nf, sf, rf, rcp_dx, muf, gradf, uf, jmats):
+            def comm_flux_ajac(i_begin, i_end, lidx, nf, sf, rf, rcp_dx,
+                               face_ids, muf, gradf, uf, jmat):
                 for idx in range(i_begin, i_end):
                     ur = array((nfvars,), np.float64)
                     um = array((nfvars,), np.float64)
@@ -569,19 +579,22 @@ class NavierStokesBCInters(BaseAdvecDiffBCInters):
                         visflux(um, gf, nfi, mu, fn)
 
                     # Compute Jacobian matrix on surface
-                    pos_jacobian(ul, nfi, ap)
-                    vis_jacobian(ul, nfi, ap, mu, rcp_dxi)
+                    com_conv_jac(ul, nfi, ap)
+                    com_visc_jac(ul, nfi, ap, mu, 0.0, rcp_dxi)
 
                     # Compute approximate Jacobian on face
                     for row in range(nfvars):
                         for col in range(nfvars):
-                            jmats[lti][0, row, col, lfi, lei] = ap[row][col]
+                            jmat[0, row, col, face_ids[idx]] = ap[row][col]
 
                     for jdx in range(nfvars):
                         # Save it at left solution array
                         uf[lti][lfi, jdx, lei] = fn[jdx]*sf[idx]
 
-            return self.be.make_loop(self.nfpts, comm_flux_ajac, lidx, nf, sf, rf, rcp_dx)
+            return self.be.make_loop(
+                self.nfpts, comm_flux_ajac, lidx, nf, sf, rf, rcp_dx,
+                self.rank_face_ids
+            )
         else:
             def comm_flux(i_begin, i_end, lidx, nf, sf, rf, muf, gradf, uf):
                 for idx in range(i_begin, i_end):

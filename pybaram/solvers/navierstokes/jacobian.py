@@ -12,6 +12,7 @@ def make_tlns_jacobian(be, cplargs, sign):
 
     # Constants
     pr, gamma = cplargs['pr'], cplargs['gamma']
+    prt = cplargs.get('prt', pr)
     ndims = cplargs['ndims']
     if sign == 'positive':
         op = 1.0
@@ -20,7 +21,7 @@ def make_tlns_jacobian(be, cplargs, sign):
     else:
         raise ValueError("Wrong sign of viscous jacobian")
     
-    def tlns2d(uf, nf, A, mu, rcp_dx):
+    def tlns2d(uf, nf, A, mu, mut, rcp_dx):
         # Basic variables
         nx = nf[0]
         ny = nf[1]
@@ -35,7 +36,9 @@ def make_tlns_jacobian(be, cplargs, sign):
         a1 = 1.0 + nx**2/3.0
         a2 = nx*ny/3.0
         a3 = 1.0 + ny**2/3.0
-        a4 = gamma/pr
+        mu_eff = mu + mut
+        mu_pr_eff = mu/pr + mut/prt
+        a4 = gamma*mu_pr_eff/mu_eff
 
         # Jacobian elements
         b21 = -(a1*u + a2*v)
@@ -45,19 +48,19 @@ def make_tlns_jacobian(be, cplargs, sign):
         b43 = -a4*v - b31
 
         # Computation
-        mu *= op*rcp_dx*inv_rho
-        A[1, 0] += mu*b21
-        A[1, 1] += mu*a1
-        A[1, 2] += mu*a2
-        A[2, 0] += mu*b31
-        A[2, 1] += mu*a2
-        A[2, 2] += mu*a3
-        A[3, 0] += mu*b41
-        A[3, 1] += mu*b42
-        A[3, 2] += mu*b43
-        A[3, 3] += mu*a4
+        mu_eff *= op*rcp_dx*inv_rho
+        A[1, 0] += mu_eff*b21
+        A[1, 1] += mu_eff*a1
+        A[1, 2] += mu_eff*a2
+        A[2, 0] += mu_eff*b31
+        A[2, 1] += mu_eff*a2
+        A[2, 2] += mu_eff*a3
+        A[3, 0] += mu_eff*b41
+        A[3, 1] += mu_eff*b42
+        A[3, 2] += mu_eff*b43
+        A[3, 3] += mu_eff*a4
 
-    def tlns3d(uf, nf, A, mu, rcp_dx):
+    def tlns3d(uf, nf, A, mu, mut, rcp_dx):
         # Basic variables
         nx = nf[0]
         ny = nf[1]
@@ -77,7 +80,9 @@ def make_tlns_jacobian(be, cplargs, sign):
         a4 = 1.0 + ny**2/3.0
         a5 = ny*nz/3.0
         a6 = 1.0 + nz**2/3.0
-        a7 = gamma/pr
+        mu_eff = mu + mut
+        mu_pr_eff = mu/pr + mut/prt
+        a7 = gamma*mu_pr_eff/mu_eff
 
         b21 = -(a1*u + a2*v + a3*w)
         b31 = -(a2*u + a4*v + a5*w)
@@ -89,24 +94,24 @@ def make_tlns_jacobian(be, cplargs, sign):
         b54 = -a7*w - b41
 
         # Computation
-        mu *= op*rcp_dx*inv_rho
-        A[1, 0] += mu*b21
-        A[1, 1] += mu*a1
-        A[1, 2] += mu*a2
-        A[1, 3] += mu*a3
-        A[2, 0] += mu*b31
-        A[2, 1] += mu*a2
-        A[2, 2] += mu*a4
-        A[2, 3] += mu*a5
-        A[3, 0] += mu*b41
-        A[3, 1] += mu*a3
-        A[3, 2] += mu*a5
-        A[3, 3] += mu*a6
-        A[4, 0] += mu*b51
-        A[4, 1] += mu*b52
-        A[4, 2] += mu*b53
-        A[4, 3] += mu*b54
-        A[4, 4] += mu*a7
+        mu_eff *= op*rcp_dx*inv_rho
+        A[1, 0] += mu_eff*b21
+        A[1, 1] += mu_eff*a1
+        A[1, 2] += mu_eff*a2
+        A[1, 3] += mu_eff*a3
+        A[2, 0] += mu_eff*b31
+        A[2, 1] += mu_eff*a2
+        A[2, 2] += mu_eff*a4
+        A[2, 3] += mu_eff*a5
+        A[3, 0] += mu_eff*b41
+        A[3, 1] += mu_eff*a3
+        A[3, 2] += mu_eff*a5
+        A[3, 3] += mu_eff*a6
+        A[4, 0] += mu_eff*b51
+        A[4, 1] += mu_eff*b52
+        A[4, 2] += mu_eff*b53
+        A[4, 3] += mu_eff*b54
+        A[4, 4] += mu_eff*a7
 
     if ndims == 2:
         return be.compile(tlns2d)
@@ -121,6 +126,7 @@ def make_approximate_jacobian(be, cplargs, sign):
 
     # Constants
     pr, gamma = cplargs['pr'], cplargs['gamma']
+    prt = cplargs.get('prt', pr)
     nfvars = cplargs['nfvars']
     if sign == 'positive':
         op = 1.0
@@ -129,10 +135,12 @@ def make_approximate_jacobian(be, cplargs, sign):
     else:
         raise ValueError("Wrong sign of viscous jacobian")
 
-    def visjacobian(uf, nf, A, mu, rcp_dx):
+    def visjacobian(uf, nf, A, mu, mut, rcp_dx):
         rho = uf[0]
 
-        lam = op*rcp_dx/rho * max(4/3, gamma)*mu/pr
+        mu_eff = mu + mut
+        mu_pr_eff = mu/pr + mut/prt
+        lam = op*rcp_dx/rho * max(4/3*mu_eff, gamma*mu_pr_eff)
 
         for idx in range(nfvars):
             A[idx, idx] += lam
@@ -145,7 +153,7 @@ def make_none_jacobian(be, cplargs, sign):
     No viscous flux Jacobian
     """
 
-    def visjacobian(uf, nf, A, mu, rcp_dx):
+    def visjacobian(uf, nf, A, mu, mut, rcp_dx):
         pass
 
     return be.compile(visjacobian)

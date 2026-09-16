@@ -5,13 +5,19 @@ from argparse import ArgumentParser
 def process_import(args):
     from pybaram.api.io import import_mesh
 
-    import_mesh(args.inmesh, args.outmesh, args.scale)
+    import_mesh(
+        args.inmesh, args.outmesh, args.scale,
+        coloring_method=args.coloring_method
+    )
 
 
 def process_part(args):
     from pybaram.api.io import partition_mesh
 
-    partition_mesh(args.mesh, args.out, args.npart, args.soln)
+    partition_mesh(
+        args.mesh, args.out, args.npart, args.soln,
+        coloring_method=args.coloring_method
+    )
 
 
 def process_export(args):
@@ -31,7 +37,7 @@ def process_run(args):
     mesh = NativeReader(args.mesh)
     cfg = INIFile(args.ini)
 
-    run(mesh, cfg, ui=args.ui)
+    run(mesh, cfg, be=args.backend, ui=args.ui)
 
 
 def process_restart(args):
@@ -49,7 +55,7 @@ def process_restart(args):
         cfg = INIFile()
         cfg.fromstr(soln['config'])
 
-    restart(mesh, soln, cfg, ui=args.ui)
+    restart(mesh, soln, cfg, be=args.backend, ui=args.ui)
 
 
 def process_sweep(args):
@@ -81,9 +87,17 @@ def build_parser():
     # Import command
     ap_import = sp.add_parser('import', help='import --help')
     ap_import.add_argument('inmesh', help='input mesh file')
-    ap_import.add_argument('outmesh', help='output mesh file')
+    ap_import.add_argument(
+        'outmesh', help='output mesh file (.pbrm: RCM, .pbrmc: coloring)'
+    )
     ap_import.add_argument('-s', '--scale', type=float, default=1,
                            help='scale mesh')
+    ap_import.add_argument(
+        '-c', '--coloring-method',
+        choices=('greedy', 'smallest-last'),
+        default='greedy',
+        help='rank coloring method for .pbrmc output'
+    )
     ap_import.set_defaults(process=process_import)
 
     # Partition command
@@ -92,6 +106,12 @@ def build_parser():
     ap_part.add_argument('mesh', help='mesh file')
     ap_part.add_argument('soln', nargs='*', type=str, help='solution file')
     ap_part.add_argument('out', help='partitioned mesh file')
+    ap_part.add_argument(
+        '-c', '--coloring-method',
+        choices=('greedy', 'smallest-last'),
+        default='greedy',
+        help='rank coloring method for .pbrmc output'
+    )
     ap_part.set_defaults(process=process_part)
 
     # Run command
@@ -103,6 +123,13 @@ def build_parser():
         choices=('tqdm', 'tui', 'none'),
         default='tqdm',
         help='progress display mode'
+    )
+    ap_run.add_argument(
+        '-b', '--backend',
+        type=str,
+        default='cpu',
+        choices=['cpu', 'cuda'],
+        help='execution backend (default: cpu, use cuda for CUDA backend)'
     )
     ap_run.set_defaults(process=process_run)
 
@@ -116,6 +143,13 @@ def build_parser():
         choices=('tqdm', 'tui', 'none'),
         default='tqdm',
         help='progress display mode'
+    )
+    ap_restart.add_argument(
+        '-b', '--backend',
+        type=str,
+        default='cpu',
+        choices=['cpu', 'cuda'],
+        help='execution backend (default: cpu, use cuda for CUDA backend)'
     )
     ap_restart.set_defaults(process=process_restart)
 

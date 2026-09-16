@@ -6,6 +6,8 @@
 from abc import ABCMeta, abstractmethod
 from collections import defaultdict
 from itertools import chain
+import heapq
+import os
 import uuid
 
 import numpy as np
@@ -23,11 +25,12 @@ class BaseReader(object, metaclass=ABCMeta):
     def _to_raw_pbm(self):
         pass
 
-    def to_pbm(self):
+    def to_pbm(self, layout='rank-order', coloring_method='greedy'):
         mesh = self._to_raw_pbm()
 
-        # Reorder Mesh (RCM)
-        reorder(mesh)
+        make_rank_layout(
+            mesh, layout, coloring_method=coloring_method
+        )
 
         # Add metadata
         mesh['mesh_uuid'] = np.array(str(uuid.uuid4()), dtype='S')
@@ -94,21 +97,33 @@ class ConsAssembler(object):
 
             # Sort faces by their node ids so matching faces are adjacent.
             order = np.lexsort(nodes.T[::-1])
-            cons = cons[order]
-            nodes = nodes[order]
+            sorted_nodes = nodes[order]
 
-            same = np.all(nodes[1:] == nodes[:-1], axis=1)
+            same = np.all(sorted_nodes[1:] == sorted_nodes[:-1], axis=1)
             cuts = np.flatnonzero(~same) + 1
             starts = np.r_[0, cuts]
-            ends = np.r_[cuts, len(nodes)]
-            counts = ends - starts
+            counts = np.diff(np.r_[starts, len(nodes)])
 
             paired = counts == 2
-            if np.any(paired):
-                pair_idx = np.column_stack([starts[paired], starts[paired] + 1]).ravel()
-                pairs[pftype].extend(cons[pair_idx].reshape(-1, 2).tolist())
+            pair_starts = starts[paired]
+            resid_starts = starts[~paired]
 
-            resid_idx = starts[~paired]
+            # The grouped node rows are no longer needed.  Release them
+            # before allocating the paired connectivity result, which is
+            # another face-sized array for large meshes.
+            del sorted_nodes, same, cuts, starts, counts, paired
+
+            if len(pair_starts):
+                # Keep cons in its original order and gather each side of a
+                # pair directly.  This avoids sorting/copying every structured
+                # connectivity record and halves the temporary integer index
+                # storage compared with a flattened two-column pair index.
+                pcon = np.empty((len(pair_starts), 2), dtype=self._con_dtype)
+                pcon[:, 0] = cons[order[pair_starts]]
+                pcon[:, 1] = cons[order[pair_starts + 1]]
+                pairs[pftype].append(pcon)
+
+            resid_idx = order[resid_starts]
             for f, n in zip(cons[resid_idx], nodes[resid_idx]):
                 resid[tuple(n)] = f
 
@@ -128,8 +143,8 @@ class ConsAssembler(object):
                 lfnodes = bparts[lpent][pftype]
                 rfnodes = bparts[rpent][pftype]
 
-                lfpts = np.array([[nodepts[n] for n in fn] for fn in lfnodes])
-                rfpts = np.array([[nodepts[n] for n in fn] for fn in rfnodes])
+                lfpts = nodepts[lfnodes]
+                rfpts = nodepts[rfnodes]
 
                 lfidx = fuzzysort(lfpts.mean(axis=1).T, range(len(lfnodes)))
                 rfidx = fuzzysort(rfpts.mean(axis=1).T, range(len(rfnodes)))
@@ -177,12 +192,16 @@ class ConsAssembler(object):
         if any(resid.values()):
             raise ValueError('Unpaired faces in mesh')
 
-        # Flatten pairs
-        pairs = chain(chain.from_iterable(pairs.values()),
-                      chain.from_iterable(ppairs.values()))
-
         # Connectivity
-        con = list(pairs)
+        con_parts = [p for parts in pairs.values() for p in parts if len(p)]
+        con_parts.extend(
+            np.asarray(p, dtype=self._con_dtype).reshape(-1, 2)
+            for p in ppairs.values() if len(p)
+        )
+        if con_parts:
+            con = np.concatenate(con_parts)
+        else:
+            con = np.empty((0, 2), dtype=self._con_dtype)
 
         # Boundary connectivity
         bcon = {}
@@ -195,91 +214,143 @@ class ConsAssembler(object):
             bcon['_virtual_'+name+'_r'] = pbfaces[rpent]
 
         # Output
-        ret = {'con_p0': np.array(con, dtype='S4,i4,i1,i1').T}
+        ret = {'con_p0': con.T}
 
         for k, v in bcon.items():
             ret['bcon_{0}_p0'.format(k)] = np.array(v, dtype='S4,i4,i1,i1')
 
         return ret
 
-    def _extract_vtx_con(self, elenodes, felespent):
-        vcon = defaultdict(list)
+    def _periodic_vertex_node_map(self, elenodes, pfacespents):
+        """Return a node-id map which merges periodic vertex pairs."""
+        if not pfacespents:
+            return None
+
+        nodepts = self._nodepts
+        parent = {}
+
+        # Union-find lets chained periodic pairs collapse to one canonical
+        # node id before the vertex records are sorted into groups.
+        def root(node):
+            parent.setdefault(node, node)
+            while parent[node] != node:
+                parent[node] = parent[parent[node]]
+                node = parent[node]
+            return node
+
+        def union(left, right):
+            lroot = root(int(left))
+            rroot = root(int(right))
+            if lroot != rroot:
+                parent[rroot] = lroot
+
+        for etype, pent in elenodes:
+            for lpent, rpent in pfacespents.values():
+                if lpent != pent:
+                    continue
+
+                # Periodic face nodes are matched geometrically by the same
+                # fuzzy sort used by the previous vertex-bucket path.
+                lnodes = np.unique(elenodes[etype, lpent])
+                rnodes = np.unique(elenodes[etype, rpent])
+
+                lpts = nodepts[lnodes]
+                rpts = nodepts[rnodes]
+
+                lidx = fuzzysort(lpts.T, range(len(lpts)))
+                ridx = fuzzysort(rpts.T, range(len(rpts)))
+
+                for li, ri in zip(lnodes[lidx], rnodes[ridx]):
+                    if li != ri:
+                        union(li, ri)
+
+        mapped = {
+            node: root(node)
+            for node in parent
+            if root(node) != node
+        }
+        if not mapped:
+            return None
+
+        keys = np.array(sorted(mapped), dtype=np.int64)
+        vals = np.array([mapped[key] for key in keys], dtype=np.int64)
+
+        return keys, vals
+
+    def _apply_periodic_vertex_node_map(self, nodes, node_map):
+        """Replace periodic node ids by their canonical representatives."""
+        if node_map is None:
+            return nodes
+
+        keys, vals = node_map
+
+        # keys is sorted, so searchsorted applies the sparse periodic map to
+        # the dense element-node vector without building a full node-id array.
+        pos = np.searchsorted(keys, nodes)
+        valid = pos < len(keys)
+        valid[valid] = keys[pos[valid]] == nodes[valid]
+
+        mapped = nodes.copy()
+        mapped[valid] = vals[pos[valid]]
+
+        return mapped
+
+    def get_vtx_connectivity(self):
+        """Build vertex connectivity without Python node buckets."""
+        felespent, pfacespents = self._pents[0], self._pents[-1]
+        elenodes = self._elenodes
+
+        nodes_parts = []
+        vtx_parts = []
+        node_map = self._periodic_vertex_node_map(elenodes, pfacespents)
+
         for etype, pent in elenodes:
             if pent != felespent:
                 continue
 
-            # Elements and type information
             petype, nnode = self._etype_map[etype]
-
             eles = elenodes[etype, pent]
             neles = len(eles)
 
+            # Build one vertex-connectivity record per element node.  The
+            # matching global mesh node id is kept separately in nodes_parts
+            # and used only to sort/group these records.
             vtx = np.empty(neles*nnode, dtype=self._con_dtype)
             vtx['f0'] = petype.encode()
             vtx['f1'] = np.repeat(np.arange(neles), nnode)
             vtx['f2'] = np.tile(np.arange(nnode), neles)
             vtx['f3'] = 0
 
-            nodes = eles.reshape(-1)
-            order = np.argsort(nodes, kind='mergesort')
-            nodes = nodes[order]
-            vtx = vtx[order]
+            nodes_parts.append(eles.reshape(-1))
+            vtx_parts.append(vtx)
 
-            cuts = np.flatnonzero(nodes[1:] != nodes[:-1]) + 1
-            starts = np.r_[0, cuts]
-            ends = np.r_[cuts, len(nodes)]
+        if not nodes_parts:
+            return {
+                'vtx_p0': np.empty(0, dtype=self._con_dtype),
+                'ivtx_p0': np.zeros(1, dtype=np.int64)
+            }
 
-            for i, j in zip(starts, ends):
-                vcon[nodes[i]].extend(vtx[i:j])
+        nodes = np.concatenate(nodes_parts)
+        vtx = np.concatenate(vtx_parts)
+        del nodes_parts, vtx_parts
+        nodes = self._apply_periodic_vertex_node_map(nodes, node_map)
 
-        return vcon
+        # Sorting by global node id places all records sharing a vertex next
+        # to each other, avoiding a Python dict/list bucket per mesh node.
+        order = np.argsort(nodes, kind='mergesort')
+        nodes = nodes[order]
+        vtx = vtx[order]
 
-    def _extract_pair_vtx_con(self, elenodes, pfacespents, vcon):
-        nodepts = self._nodepts
-        pairs = []
+        # Group boundaries become ivtx offsets into the already sorted vtx
+        # array; the node ids themselves are not needed by the solver.
+        cuts = np.flatnonzero(nodes[1:] != nodes[:-1]) + 1
+        starts = np.r_[0, cuts]
+        ends = np.r_[cuts, len(nodes)]
+        ivtx = np.empty(len(starts) + 1, dtype=np.int64)
+        ivtx[0] = 0
+        np.cumsum(ends - starts, out=ivtx[1:])
 
-        for etype, pent in elenodes:
-            for lpent, rpent in pfacespents.values():
-                if lpent == pent:
-                    pairs.append([(etype, lpent), (etype, rpent)])
-
-        for lk, rk in pairs:
-            lnodes = np.unique(elenodes[lk])
-            rnodes = np.unique(elenodes[rk])
-
-            lpts = np.array([nodepts[i] for i in lnodes])
-            rpts = np.array([nodepts[i] for i in rnodes])
-
-            lidx = fuzzysort(lpts.T, range(len(lpts)))
-            ridx = fuzzysort(rpts.T, range(len(rpts)))
-
-            for li, ri in zip(lnodes[lidx], rnodes[ridx]):
-                if li != ri:
-                    # Prevent duplicated vcon for periodic faces
-                    vcon[li].extend(vcon[ri])
-                    vcon[ri] = []
-                pass
-
-    def get_vtx_connectivity(self):
-        felespent, pfacespents = self._pents[0], self._pents[-1]
-
-        # Extract vertex
-        vcon = self._extract_vtx_con(self._elenodes, felespent)
-
-        self._extract_pair_vtx_con(self._elenodes, pfacespents, vcon)
-
-        # Flatten vtx
-        keys = [k for k in sorted(vcon) if len(vcon[k]) > 0]
-        vtx = chain.from_iterable([vcon[k] for k in keys])
-        vtx = np.array(list(vtx), dtype=self._con_dtype)
-
-        # Get address in terms of vertex connectivity
-        ivtx = np.cumsum([0] + [len(vcon[k]) for k in keys])
-
-        # Output
-        ret = {'vtx_p0': vtx, 'ivtx_p0': ivtx}
-
-        return ret
+        return {'vtx_p0': vtx, 'ivtx_p0': ivtx}
 
 
 class NodesAssembler(object):
@@ -361,54 +432,472 @@ class NodesAssembler(object):
         return btri
     
 
-def reorder(mshm, rank=0):
-    # Split connectivity
-    lhs, rhs = mshm['con_p{}'.format(rank)].astype('U4,i4,i1,i1')
+def get_mesh_layout(path):
+    ext = os.path.splitext(path)[1].lower()
+    layouts = {'.pbrm': 'rank-order', '.pbrmc': 'rank-coloring'}
 
-    # Collect number of elements
-    nele_map = {k.split('_')[1]: len(mshm[k]) for k in mshm 
-                if k.startswith('elm') and k.endswith('p{}'.format(rank))}
-        
-    # Constrcut graph
-    graphs = construct_ele_graph(nele_map, lhs, rhs)
+    try:
+        return layouts[ext]
+    except KeyError:
+        raise ValueError(
+            "Mesh output extension must be .pbrm or .pbrmc"
+        )
 
-    mapper = {}
-    for t, graph in graphs.items():
-        # reverse Cuthill MacKee reordering
-        try:
-            # By Scipy
-            mapper[t] = _rcm_by_scipy(graph)
-        except:
-            # By NetworkX
-            mapper[t] = _rcm_by_nx(graph)
 
-    # Update DB
-    for etype in nele_map:
-        # Upate elm /spt
-        elm = mshm['elm_{}_p{}'.format(etype, rank)]
-        mshm['elm_{}_p{}'.format(etype, rank)] = elm[mapper[etype]]
+def make_rank_layout(
+    mshm, layout, rank=0, coloring_method='greedy'
+):
+    if layout == 'rank-order':
+        return make_rank_order(mshm, rank, reorder=True)
+    elif layout == 'rank-coloring':
+        return make_rank_coloring(
+            mshm, rank, coloring_method=coloring_method, reorder=True
+        )
+    else:
+        raise ValueError("Unknown rank-wide mesh layout '{}'".format(layout))
 
-        spt = mshm['spt_{}_p{}'.format(etype, rank)]
-        mshm['spt_{}_p{}'.format(etype, rank)] = spt[:, mapper[etype]]
 
-        unmapper = np.argsort(mapper[etype])
-        
-        # Update cons (local)
-        _update_con(mshm['con_p{}'.format(rank)][0], etype, unmapper)
-        _update_con(mshm['con_p{}'.format(rank)][1], etype, unmapper)
+def convert_rank_layout(mshm, layout, coloring_method='greedy'):
+    """Replace the rank-wide layout metadata for every mesh partition."""
+    for name in list(mshm):
+        if name.startswith(('rorder_', 'rcolor_')):
+            del mshm[name]
 
-        # Update bcons and con_pxpy
-        for name in mshm:
-            if name.startswith('bcon') and name.endswith('p{}'.format(rank)):
-                _update_con(mshm[name], etype, unmapper)
+    ranks = set()
+    for name in mshm:
+        match = re.match(r'elm_[^_]+_p(\d+)$', name)
+        if match:
+            ranks.add(int(match.group(1)))
 
-            if name.startswith('con_p{}p'.format(rank)):
-                _update_con(mshm[name], etype, unmapper)
+    for rank in sorted(ranks):
+        make_rank_layout(
+            mshm, layout, rank, coloring_method=coloring_method
+        )
 
-        # Update vtx
-        _update_con(mshm['vtx_p{}'.format(rank)], etype, unmapper)
+    return mshm
 
-    return mapper
+
+def _rank_graph(mshm, rank):
+    from scipy import sparse
+
+    lhs, rhs = mshm['con_p{}'.format(rank)]
+
+    etypes = sorted(
+        k.split('_')[1] for k in mshm
+        if k.startswith('elm_') and k.endswith('_p{}'.format(rank))
+    )
+    nele = {
+        etype: len(mshm['elm_{}_p{}'.format(etype, rank)])
+        for etype in etypes
+    }
+
+    # Contiguous rank-wide ranges for each element type.
+    offsets = {}
+    offset = 0
+    for etype in etypes:
+        offsets[etype] = offset
+        offset += nele[etype]
+
+    # Convert element-local connectivity records to rank-wide cell IDs.
+    neles = offset
+    # Scipy's graph routines support 32-bit CSR indices.  Keeping the
+    # temporary endpoint arrays at that width substantially reduces both
+    # allocation traffic and peak memory for meshes which fit in int32.
+    idx_dtype = (
+        np.int32 if neles <= np.iinfo(np.int32).max else np.int64
+    )
+    lridx = np.empty(len(lhs), dtype=idx_dtype)
+    rridx = np.empty(len(rhs), dtype=idx_dtype)
+
+    for etype in etypes:
+        etype_b = etype.encode()
+        lmask = lhs['f0'] == etype_b
+        rmask = rhs['f0'] == etype_b
+
+        lridx[lmask] = offsets[etype] + lhs['f1'][lmask]
+        rridx[rmask] = offsets[etype] + rhs['f1'][rmask]
+
+    # Build the symmetric adjacency directly as CSR.  COO-to-CSR performs
+    # row grouping and duplicate removal without materializing int64 scalar
+    # edge keys (src*neles + dst) and their np.unique sorting workspace.
+    valid = lridx != rridx
+    if np.any(valid):
+        nedges = 2*np.count_nonzero(valid)
+        src = np.empty(nedges, dtype=idx_dtype)
+        dst = np.empty(nedges, dtype=idx_dtype)
+        nvalid = nedges // 2
+        src[:nvalid] = lridx[valid]
+        src[nvalid:] = rridx[valid]
+        dst[:nvalid] = rridx[valid]
+        dst[nvalid:] = lridx[valid]
+
+        graph = sparse.coo_matrix(
+            (np.ones(nedges, dtype=np.int8), (src, dst)),
+            shape=(neles, neles)
+        ).tocsr()
+        graph.sum_duplicates()
+        graph.sort_indices()
+
+        indptr = graph.indptr
+        indices = graph.indices
+    else:
+        indptr = np.zeros(neles + 1, dtype=idx_dtype)
+        indices = np.array([], dtype=idx_dtype)
+
+    return etypes, nele, offsets, {
+        'indptr': indptr, 'indices': indices
+    }
+
+
+def reorder_rank_cells(mshm, rank=0, ordering=None):
+    """Physically renumber rank-local element data and connectivity.
+
+    ``ordering`` maps each element type to old element-local indices in the
+    desired new order.  When omitted, element-type-local RCM orderings are
+    computed from same-type rank-local face adjacencies.
+    """
+    etypes = sorted(
+        k.split('_')[1] for k in mshm
+        if k.startswith('elm_') and k.endswith('_p{}'.format(rank))
+    )
+    if ordering is None:
+        lhs, rhs = mshm['con_p{}'.format(rank)]
+        nele = {
+            etype: len(mshm['elm_{}_p{}'.format(etype, rank)])
+            for etype in etypes
+        }
+        graphs = _etype_rank_graphs(nele, lhs, rhs)
+        ordering = {}
+        for etype, graph in graphs.items():
+            if nele[etype]:
+                ordering[etype] = _rcm_by_scipy(graph)
+            else:
+                ordering[etype] = np.array([], dtype=np.int64)
+
+    old_to_new = {}
+    for etype in etypes:
+        neles = len(mshm['elm_{}_p{}'.format(etype, rank)])
+        idx_dtype = (
+            np.int32 if neles <= np.iinfo(np.int32).max else np.int64
+        )
+        perm = np.asarray(ordering[etype], dtype=idx_dtype)
+        if perm.shape != (neles,):
+            raise ValueError(
+                "Local rank ordering for {} p{} must contain one entry "
+                "per cell".format(etype, rank)
+            )
+
+        mapper = np.empty(neles, dtype=idx_dtype)
+        mapper[perm] = np.arange(neles, dtype=idx_dtype)
+        old_to_new[etype] = mapper
+
+        mshm['elm_{}_p{}'.format(etype, rank)] = (
+            mshm['elm_{}_p{}'.format(etype, rank)][perm]
+        )
+
+        spt_name = 'spt_{}_p{}'.format(etype, rank)
+        if spt_name in mshm:
+            mshm[spt_name] = mshm[spt_name][:, perm]
+
+    con_name = 'con_p{}'.format(rank)
+    _update_con(mshm[con_name][0], old_to_new)
+    _update_con(mshm[con_name][1], old_to_new)
+
+    suffix = '_p{}'.format(rank)
+    mpi_prefix = 'con_p{}p'.format(rank)
+    bcon_names = [
+        name for name in mshm
+        if name.startswith('bcon_') and name.endswith(suffix)
+    ]
+    mpi_con_names = [
+        name for name in mshm
+        if name.startswith(mpi_prefix)
+    ]
+    for name in bcon_names:
+        _update_con(mshm[name], old_to_new)
+    for name in mpi_con_names:
+        _update_con(mshm[name], old_to_new)
+
+    vtx_name = 'vtx_p{}'.format(rank)
+    if vtx_name in mshm:
+        _update_con(mshm[vtx_name], old_to_new)
+
+    return old_to_new
+
+
+def _etype_rank_graphs(nele, lhs, rhs):
+    graph = {}
+
+    for etype, neles in nele.items():
+        etype_b = etype.encode()
+        mask = (lhs['f0'] == etype_b) & (rhs['f0'] == etype_b)
+
+        if np.any(mask):
+            # Build same-type directed edges directly from the paired faces.
+            # This avoids materializing a large two-row structured array.
+            lidx = np.concatenate([lhs['f1'][mask], rhs['f1'][mask]])
+            lface = np.concatenate([lhs['f2'][mask], rhs['f2'][mask]])
+            ridx = np.concatenate([rhs['f1'][mask], lhs['f1'][mask]])
+
+            # Group by source element so the neighbor list is already in CSR
+            # row order; the face index is only a deterministic tie-breaker.
+            idx = np.lexsort([lface, lidx])
+            lidx = lidx[idx]
+            ridx = ridx[idx]
+
+            cuts = np.flatnonzero(lidx[1:] != lidx[:-1]) + 1
+            off = np.r_[0, cuts, len(lidx)]
+            counts = np.zeros(neles, dtype=np.int64)
+            counts[lidx[off[:-1]]] = np.diff(off)
+
+            indptr = np.empty(neles + 1, dtype=np.int64)
+            indptr[0] = 0
+            np.cumsum(counts, out=indptr[1:])
+            indices = ridx.astype(np.int64, copy=False)
+        else:
+            indptr = np.zeros(neles + 1, dtype=np.int64)
+            indices = np.array([], dtype=np.int64)
+
+        graph[etype] = {'indptr': indptr, 'indices': indices}
+
+    return graph
+
+
+def _update_con(con, mapper):
+    cell_ids = con['f1']
+    for etype, old_to_new in mapper.items():
+        # A boolean mask is one eighth the size of np.nonzero's int64 index
+        # array and avoids retaining another large connectivity-sized array
+        # while cell data is being physically reordered.
+        mask = con['f0'] == etype.encode()
+        cell_ids[mask] = old_to_new[cell_ids[mask]]
+
+
+def make_rank_order(mshm, rank=0, reorder=False):
+    """Store rank-wide RCM IDs for each element type.
+
+    The graph is built in the contiguous mixed-element rank space from
+    ``_rank_graph``.  The stored ``rorder_*`` arrays map element-local cell
+    IDs to the mixed-element rank sweep/order IDs.
+
+    When ``reorder`` is enabled by import/partition, each element type is
+    also physically sorted by those rank-wide IDs.  Element arrays cannot
+    interleave different types, but this keeps each type's local storage as
+    close as possible to the rank-wide RCM sequence.
+    """
+    etypes, nele, offsets, graph = _rank_graph(mshm, rank)
+    neles = len(graph['indptr']) - 1
+
+    if neles:
+        permutation = _rcm_by_scipy(graph)
+
+        # RCM returns cells in order; invert it to get cell -> order ID.
+        rank_ids = np.argsort(permutation)
+        del permutation
+    else:
+        rank_ids = np.array([], dtype=np.int64)
+
+    # The CSR graph is no longer needed once RCM has completed.  Release it
+    # before the largest spt/elm arrays are copied into their reordered form.
+    del graph
+
+    order_data = {}
+    for etype in etypes:
+        begin = offsets[etype]
+        end = begin + nele[etype]
+        order_data[etype] = rank_ids[begin:end]
+
+    if reorder:
+        ordering = {}
+        for etype, local_rank_ids in order_data.items():
+            # Keep each element type contiguous in storage, but make its local
+            # order follow the rank-wide RCM sequence as closely as possible.
+            ordering[etype] = np.argsort(local_rank_ids, kind='stable')
+            order_data[etype] = local_rank_ids[ordering[etype]]
+
+        # All order_data values now own their sorted data instead of viewing
+        # the mixed rank_ids array.
+        del rank_ids
+        mapper = reorder_rank_cells(mshm, rank, ordering)
+    else:
+        mapper = None
+
+    # Slice the mixed-element rank IDs back into per-element datasets.
+    for etype in etypes:
+        mshm['rorder_{}_p{}'.format(etype, rank)] = order_data[etype]
+
+    if reorder:
+        return mapper
+    else:
+        return {
+            etype: mshm['rorder_{}_p{}'.format(etype, rank)]
+            for etype in etypes
+        }
+
+
+def make_rank_coloring(
+    mshm, rank=0, coloring_method='greedy', reorder=False
+):
+    """Create a rank-wide mixed-element greedy coloring.
+
+    When ``reorder`` is enabled by import/partition, each element type is
+    physically grouped by color so colored kernels walk mostly contiguous
+    element-local storage inside each color barrier.
+    """
+    # Build the mixed-element adjacency graph in rank-wide cell IDs.
+    etypes, nele, offsets, graph = _rank_graph(mshm, rank)
+    indptr, indices = graph['indptr'], graph['indices']
+    neles = len(indptr) - 1
+
+    if coloring_method == 'greedy':
+        order = _greedy_coloring_order(indptr, indices)
+    elif coloring_method == 'smallest-last':
+        order = _smallest_last_order(indptr, indices)
+    else:
+        raise ValueError(
+            "Unknown rank coloring method '{}'".format(coloring_method)
+        )
+
+    color = _sequential_coloring(indptr, indices, order)
+
+    # Coloring is complete; do not retain the rank graph while copying the
+    # largest element and solution-point arrays into color order.
+    del graph, indptr, indices, order
+
+    ordering = {}
+    color_data = {}
+    for etype in etypes:
+        begin = offsets[etype]
+        end = begin + nele[etype]
+        color_data[etype] = color[begin:end]
+
+    if reorder:
+        for etype, local_color in color_data.items():
+            ordering[etype] = np.argsort(local_color, kind='stable')
+            color_data[etype] = local_color[ordering[etype]]
+
+        mapper = reorder_rank_cells(mshm, rank, ordering)
+    else:
+        mapper = None
+
+    # Slice the rank-wide color vector back into per-element data.
+    for etype in etypes:
+        mshm['rcolor_{}_p{}'.format(etype, rank)] = color_data[etype]
+
+    if reorder:
+        return mapper
+    else:
+        return {
+            etype: mshm['rcolor_{}_p{}'.format(etype, rank)]
+            for etype in etypes
+        }
+
+
+def _greedy_coloring_order(indptr, indices):
+    """Return high-degree-first greedy coloring order."""
+    neles = len(indptr) - 1
+    if neles == 0:
+        return np.array([], dtype=np.int64)
+
+    degrees = np.diff(indptr)
+    return np.lexsort((np.arange(neles), -degrees))
+
+
+def _sequential_coloring(indptr, indices, order):
+    """Color a CSR graph in the given order."""
+    neles = len(indptr) - 1
+    if neles == 0:
+        return np.array([], dtype=np.int32)
+
+    try:
+        # graph-tool provides the fast path when it is installed; keep the
+        # Python implementation as a dependency-light fallback.
+        return _sequential_coloring_by_graph_tool(indptr, indices, order)
+    except ImportError:
+        return _sequential_coloring_by_python(indptr, indices, order)
+
+
+def _sequential_coloring_by_graph_tool(indptr, indices, order):
+    import graph_tool as gt
+    import graph_tool.topology as gtt
+
+    neles = len(indptr) - 1
+    idx_dtype = (
+        np.int32 if neles <= np.iinfo(np.int32).max else np.int64
+    )
+    rows = np.repeat(
+        np.arange(neles, dtype=idx_dtype), np.diff(indptr)
+    )
+
+    # The CSR graph is symmetric; pass each undirected edge to graph-tool
+    # once.  Allocate only the retained upper-triangle edge list instead of
+    # first materializing a two-column array for every directed edge.
+    upper = rows < indices
+    edges = np.empty((np.count_nonzero(upper), 2), dtype=idx_dtype)
+    edges[:, 0] = rows[upper]
+    edges[:, 1] = indices[upper]
+    del rows, upper
+
+    graph = gt.Graph(directed=False)
+    graph.add_vertex(neles)
+    graph.add_edge_list(edges)
+    del edges
+
+    order_map = graph.new_vp('int64_t')
+    order_map.a = np.asarray(order, dtype=np.int64)
+
+    color = gtt.sequential_vertex_coloring(graph, order_map).a
+    # graph-tool colors are zero-based, while pyBaram stores positive labels.
+    return color.astype(np.int32, copy=False) + 1
+
+
+def _sequential_coloring_by_python(indptr, indices, order):
+    color = np.zeros(len(indptr) - 1, dtype=np.int32)
+
+    for idx in order:
+        used = {
+            color[nei]
+            for nei in indices[indptr[idx]:indptr[idx + 1]]
+            if color[nei] > 0
+        }
+
+        current = 1
+        while current in used:
+            current += 1
+        color[idx] = current
+
+    return color
+
+
+def _smallest_last_order(indptr, indices):
+    """Return cells in smallest-last greedy coloring order."""
+    neles = len(indptr) - 1
+    if neles == 0:
+        return np.array([], dtype=np.int64)
+
+    degree = np.diff(indptr).astype(np.int64, copy=True)
+    removed = np.zeros(neles, dtype=bool)
+    removal = np.empty(neles, dtype=np.int64)
+    heap = [(int(degree[idx]), idx) for idx in range(neles)]
+    heapq.heapify(heap)
+
+    for pos in range(neles):
+        while True:
+            deg, idx = heapq.heappop(heap)
+            if not removed[idx] and deg == degree[idx]:
+                break
+
+        removed[idx] = True
+        removal[pos] = idx
+
+        for nei in indices[indptr[idx]:indptr[idx + 1]]:
+            if removed[nei]:
+                continue
+
+            degree[nei] -= 1
+            heapq.heappush(heap, (int(degree[nei]), int(nei)))
+
+    return removal[::-1]
 
 
 def _rcm_by_scipy(graph):
@@ -420,75 +909,10 @@ def _rcm_by_scipy(graph):
     nm = len(indptr) - 1
 
     # Convert graph to sparse matrix
+    # RCM only needs the sparsity pattern, so keep the data payload tiny.
     mtx = sparse.csr_matrix(
-            (np.ones_like(indices), indices, indptr),
-            shape=(nm,nm)
+            (np.ones(indices.size, dtype=np.int8), indices, indptr),
+            shape=(nm,nm), copy=False
         )
 
     return reverse_cuthill_mckee(mtx)
-
-
-def _rcm_by_nx(graph):
-    # Use networkx package
-    import networkx as nx
-    from networkx.utils import reverse_cuthill_mckee_ordering as reverse_cuthill_mckee
-
-    indices, indptr = graph['indices'], graph['indptr']
-
-    # Build graph
-    G = nx.Graph()
-
-    # Add connectivity (edge)
-    for row in range(len(indptr) - 1):
-        start = indptr[row]
-        end = indptr[row + 1]
-        cols = indices[start:end]
-
-        for col in cols:
-            G.add_edge(row, col)
-    
-    return np.array(list(reverse_cuthill_mckee(G)))
-
-
-def construct_ele_graph(nele_map, lhs, rhs):
-    graph = {}
-
-    # Construct connectivity (fact to ele)
-    con = np.hstack([[lhs, rhs], [rhs, lhs]])[['f0', 'f1', 'f2']]
-
-    for t, neles in nele_map.items():
-        mask = (con['f0'][0] == t) & (con['f0'][1] == t)
-
-        if np.any(mask):    
-            # Get local connectiviy for each element
-            lcon = con[:, mask]
-            
-            # Reorder w.r.t. left
-            idx = np.lexsort([lcon['f2'][0], lcon['f1'][0]])
-            l, r = lcon[:, idx]
-
-            # Get offset (address array)
-            tab = np.where(l['f1'][1:] != l['f1'][:-1])[0]
-            off = np.concatenate([[0], tab + 1, [len(l)]])
-            
-            # data
-            data = r['f1'].copy()
-
-            # Rearrange indptr
-            ind = np.zeros(neles, dtype=int)
-            ind[l['f1'][off[:-1]]] = np.diff(off)
-            indptr = np.concatenate([[0], np.cumsum(ind)])
-        else:                
-            # Null graph
-            indptr = np.zeros(neles+1, dtype=int)
-            data = np.array([], dtype=int)
-
-        graph[t] = {'indptr' : indptr, 'indices' : data}
-
-    return graph
-
-
-def _update_con(lhs, etype, mapper):
-    mask = lhs['f0'] == etype.encode()
-    f1 = lhs[mask]['f1']
-    lhs['f1'][mask] = mapper[f1]

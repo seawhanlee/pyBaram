@@ -34,20 +34,44 @@ class CGNSZoneReader(object):
         for idx in range(cgns.nsections(zone)):
             elerng, elenode = self._read_element(zone, idx)
 
+            neles = elerng[1] - elerng[0] + 1
+            assigned = np.zeros(neles, dtype=bool)
             for jdx, (bcname, (bcrng, bclist)) in enumerate(bc.items()):
-                if ((elerng[0] <= bcrng[0]) and (bcrng[0] <= elerng[1])) or ((elerng[0] <= bcrng[1]) and (bcrng[1] <= elerng[1])):
-                    name = bcname
-                    bclist = np.array(bclist)
-                    picks = bclist[(bclist >= elerng[0]) & (bclist < elerng[1] + 1)] - elerng[0]
-                    break
-            else:
-                name = 'fluid'
-                picks = Ellipsis
-                jdx = -1
+                mask = ((bclist >= elerng[0]) & (bclist <= elerng[1]))
+                if np.any(mask):
+                    picks = bclist[mask] - elerng[0]
+                    if np.any((picks < 0) | (picks >= elerng[1] - elerng[0] + 1)):
+                        raise RuntimeError('BC element outside section')
 
-            pent = pents.setdefault(name, jdx+1)
+                    if np.any(assigned[picks]):
+                        raise RuntimeError(
+                            'Overlapping BC element IDs in section'
+                        )
 
-            elenodes.update({(k, pent): v[picks] for k, v in elenode.items()})
+                    assigned[picks] = True
+                    pent = pents.setdefault(bcname, jdx+1)
+
+                    for k, v in elenode.items():
+                        key = k, pent
+                        selected = v[picks]
+                        if key in elenodes:
+                            elenodes[key] = np.concatenate(
+                                (elenodes[key], selected), axis=0
+                            )
+                        else:
+                            elenodes[key] = selected
+
+            if not np.any(assigned):
+                pent = pents.setdefault('fluid', 0)
+                for k, v in elenode.items():
+                    key = k, pent
+                    if key in elenodes:
+                        elenodes[key] = np.concatenate((elenodes[key], v),
+                                                       axis=0)
+                    else:
+                        elenodes[key] = v
+            elif not np.all(assigned):
+                raise RuntimeError('Unassigned BC elements in section')
 
     def _read_nodepts(self, zone):
         nnode = zone['size'][0]
@@ -65,9 +89,18 @@ class CGNSZoneReader(object):
 
         for idx_bc in range(nbc):
             boco = self._cgns.boco_read(zone, idx_bc)
-            name = boco['name'].lower()
-            name = re.sub(r'\s+', '_', name)
-            bc[name] = boco['range'], boco['list']
+            raw_name = boco['name'].lower()
+            name = re.sub(r'[\s-]+', '_', raw_name)
+            if name in bc:
+                raise RuntimeError(
+                    'Duplicate BC name after sanitizing {} to {}'.format(
+                        raw_name, name
+                    )
+                )
+            bclist = np.asarray(boco['list'], dtype=self._cgns.int_np)
+            if len(np.unique(bclist)) != len(bclist):
+                raise RuntimeError('Duplicate element ID in BC {}'.format(name))
+            bc[name] = boco['range'], bclist
 
         return bc
 

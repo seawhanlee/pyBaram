@@ -51,7 +51,7 @@ class BaseAdvecElements(BaseElements):
 
         # Kernel to compute residuals
         self.compute_resid = Kernel(*self._make_compute_resid(), upts_res, self.resid_out)
-        self.reduce_resid = Kernel(self.be.reduce_array(self.nvars), self.resid_out, self.d_resid)
+        self.reduce_resid = Kernel(self.be.make_sum_reduce(self.nvars), self.resid_out, self.d_resid)
 
         if self.order > 1:
             # Kernel to compute gradient

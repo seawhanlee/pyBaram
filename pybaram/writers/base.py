@@ -8,6 +8,7 @@ import re
 from pybaram.inifile import INIFile
 from pybaram.solvers import get_fluid
 from pybaram.solvers.base import BaseElements
+from pybaram.utils.np import npeval
 
 
 class BaseWriter(object):
@@ -107,7 +108,7 @@ class BaseWriter(object):
         return snames, sdata, vnames, vdata
 
     def extract_surface(self, mesh, soln, cfg, surf_names):
-        # Extract boundary connectivities
+        # Extract boundary connectivities while retaining the surface name
         bcons = self._extract_bcons(mesh, surf_names)
 
         # Load Fluid Elements
@@ -119,10 +120,46 @@ class BaseWriter(object):
         sdata = defaultdict(list)
         vdata = defaultdict(list)
 
-        # Check Viscous flow or not
+        # Check whether the flow is viscous
         is_viscous = hasattr(fluid, "mu_container")
 
-        for rank, bcon in bcons.items():
+        # Check whether wall enthalpy-gradient data is required
+        thermal_bcs = {}
+        is_enthalpy_gradient = False
+        if is_viscous:
+            constants = None
+            for surf_name in surf_names:
+                # Read the boundary-condition type
+                bcsect = 'soln-bcs-{}'.format(surf_name)
+                bctype = (
+                    cfg.get(bcsect, 'type').strip().lower()
+                    if cfg.has_option(bcsect, 'type') else None
+                )
+                cptw = None
+
+                if bctype == 'isotherm-wall':
+                    # Enable wall enthalpy-gradient output
+                    is_enthalpy_gradient = True
+
+                    # Read the wall enthalpy for the isothermal boundary
+                    if not cfg.has_option(bcsect, 'cptw'):
+                        raise ValueError(
+                            (
+                                "Boundary '{}' is an isotherm-wall but CpTw "
+                                "is not set"
+                            ).format(surf_name)
+                        )
+
+                    if constants is None:
+                        constants = cfg.items('constants')
+                    cptw = npeval(cfg.getexpr(bcsect, 'cptw', constants))
+
+                # Cache the BC type and wall enthalpy for each surface
+                thermal_bcs[surf_name] = bctype, cptw
+
+        for surf_name, rank, bcon in bcons:
+            bctype, cptw = thermal_bcs.get(surf_name, (None, None))
+
             for etype in np.unique(bcon['f0']):
                 fluid.ndims = self._petype_ndim[etype]
 
@@ -170,12 +207,29 @@ class BaseWriter(object):
                         dx = ele.xf[fidx_f, eidx_f] - ele.xc[eidx_f]
                         dxn = np.einsum('ij,ji->j', vec_fnorm, dx)
 
+                        # Approximate the wall-to-cell enthalpy gradient;
+                        # CpTw is the isothermal-wall specific enthalpy.
+                        if is_enthalpy_gradient:
+                            if bctype == 'isotherm-wall':
+                                hgradn = (
+                                    (sol[fluid.ndims+1, eidx_f] + p)/rho
+                                    - 0.5*np.einsum('ij,ij->j', uvw, uvw)
+                                    - cptw
+                                )/dxn
+                            elif bctype == 'adia-wall':
+                                hgradn = np.zeros_like(dxn)
+                            else:
+                                hgradn = np.full_like(dxn, np.nan)
+
                         # Tangential velocity
                         vt = uvw - np.einsum('ij,ij->j', vec_fnorm, uvw)*vec_fnorm
                         trac_vel = vt/dxn
 
                         # Save pressure, viscosity and tracion velocity
-                        sdata[ftype].append(np.vstack([rho, p, *auxf]))
+                        scalars = [rho, p]
+                        if is_enthalpy_gradient:
+                            scalars.append(hgradn)
+                        sdata[ftype].append(np.vstack([*scalars, *auxf]))
                         vdata[ftype].append(np.vstack([mag_fnorm*vec_fnorm, trac_vel]))
                     else:
                         # Save pressure for inviscid flow
@@ -185,14 +239,17 @@ class BaseWriter(object):
         self.ndims = fluid.ndims
 
         # Merge data for face type
-        elms = OrderedDict({k: np.vstack(v) for k, v in elms.items()})
-        sdata = np.hstack([np.hstack(sdata[k]) for k in sorted(sdata)])
-        vdata = np.hstack([np.hstack(vdata[k]) for k in sorted(vdata)])
+        face_types = sorted(elms)
+        elms = OrderedDict((k, np.vstack(elms[k])) for k in face_types)
+        sdata = np.hstack([np.hstack(sdata[k]) for k in face_types])
+        vdata = np.hstack([np.hstack(vdata[k]) for k in face_types])
 
-        snames = ['rho', 'p'] 
+        snames = ['rho', 'p']
         vnames = ['n']
 
         if is_viscous:
+            if is_enthalpy_gradient:
+                snames.append('WallNormalEnthalpyGradient')
             snames += fluid.auxvars
             vnames += ['wsr']
         
@@ -221,19 +278,37 @@ class BaseWriter(object):
         self._soln = snames, sdata, vnames, vdata
 
     def _extract_bcons(self, mesh, surf_names):
+        requested = set(surf_names)
         bcons = defaultdict(list)
+        found = set()
+
         for key in mesh:
             # Find BC data
-            m = re.match(r'bcon_([a-z_\d]+)_p(\d+)$', key)
+            m = re.match(r'^bcon_(.+)_p(\d+)$', key)
 
-            if m and m.group(1) in surf_names:
+            if m and m.group(1) in requested:
                 bc = m.group(1)
-                rank = eval(m.group(2))
+                rank = int(m.group(2))
+                found.add(bc)
 
                 # Parse BC indexes
-                bcons[rank].append(mesh['bcon_{}_p{}'.format(bc, rank)].astype("U4,i4,i1,i1"))
+                bcons[bc, rank].append(
+                    mesh[key].astype("U4,i4,i1,i1")
+                )
 
-        return {k: np.concatenate(v) for k, v in bcons.items()}
+        missing = requested - found
+        if missing:
+            raise ValueError(
+                'Unknown surface(s): {}'.format(', '.join(sorted(missing)))
+            )
+
+        return [
+            (surf_name, rank, np.concatenate(bcons[surf_name, rank]))
+            for surf_name in surf_names
+            for rank in sorted(
+                rank for bc, rank in bcons if bc == surf_name
+            )
+        ]
     
     def write(self):
         self._raw_write()

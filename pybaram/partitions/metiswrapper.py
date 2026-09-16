@@ -86,26 +86,28 @@ class METISWrapper:
         _ncon = metis_int(ncon)
         objval = metis_int()
 
-        xadj = xadj.astype(metis_int_np)
-        adjncy = adjncy.astype(metis_int_np)
+        # Match the METIS ABI without copying arrays that already have the
+        # probed integer/float dtype.
+        xadj = xadj.astype(metis_int_np, copy=False)
+        adjncy = adjncy.astype(metis_int_np, copy=False)
 
         if vwts is not None:
-            vwts = vwts.astype(metis_int_np)
+            vwts = vwts.astype(metis_int_np, copy=False)
 
         if vsize is not None:
-            vsize = vsize.astype(metis_int_np)
+            vsize = vsize.astype(metis_int_np, copy=False)
 
         if adjwgt is not None:
-            adjwgt = adjwgt.astype(metis_int_np)
+            adjwgt = adjwgt.astype(metis_int_np, copy=False)
 
         if tpwgts is None:
             tpwgts = np.ones(nparts*ncon, dtype=self.metis_float_np)
             tpwgts /= nparts
         else:
-            tpwgts = tpwgts.astype(self.metis_float_np)
+            tpwgts = tpwgts.astype(self.metis_float_np, copy=False)
 
         if ubvec is not None:
-            ubvec = ubvec.astype(self.metis_float_np)
+            ubvec = ubvec.astype(self.metis_float_np, copy=False)
 
         if opts is None:
             # Initialize default options

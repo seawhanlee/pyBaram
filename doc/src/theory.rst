@@ -94,6 +94,83 @@ Turbulent thermal conductivity is computed using turbulent Prandtl number :math:
 .. math::
    \Theta_x = u \tau_{xx} + v \tau_{xy} + w \tau_{xz} + \gamma \left(\frac{\mu}{Pr} + \frac{\mu_t}{Pr_t} \right) T_x
 
+Turbulence Model Equations
+--------------------------
+The RANS turbulence variables are advanced with the same finite-volume
+procedure as the mean-flow variables. ``pyBaram`` currently provides the
+Spalart-Allmaras model, the negative Spalart-Allmaras variant, and the
+Menter SST model.
+
+For the Spalart-Allmaras model, the transported variable is
+:math:`\tilde{\nu}` and the eddy viscosity is
+
+.. math::
+   \mu_t = \rho \tilde{\nu} f_{v1}, \qquad
+   f_{v1} = \frac{\chi^3}{\chi^3 + c_{v1}^3}, \qquad
+   \chi = \frac{\tilde{\nu}}{\nu}.
+
+The model equation can be written as
+
+.. math::
+   \frac{D\tilde{\nu}}{Dt}
+   =
+   c_{b1}\tilde{S}\tilde{\nu}
+   + \frac{1}{\sigma}
+     \left[
+       \nabla \cdot ((\nu+\tilde{\nu})\nabla\tilde{\nu})
+       + c_{b2}|\nabla\tilde{\nu}|^2
+     \right]
+   - c_{w1} f_w \left(\frac{\tilde{\nu}}{d}\right)^2 .
+
+Here :math:`d` is the distance to the nearest wall. The auxiliary functions
+:math:`\tilde{S}` and :math:`f_w` follow the standard SA definition
+:cite:`Spalart1994`.
+
+The negative Spalart-Allmaras model uses the same equation when
+:math:`\tilde{\nu} \ge 0`. When :math:`\tilde{\nu} < 0`, ``pyBaram`` sets
+:math:`\mu_t=0` and applies the negative branch
+
+.. math::
+   \frac{D\tilde{\nu}}{Dt}
+   =
+   c_{b1}(1-c_{t3})\Omega\tilde{\nu}
+   + \frac{1}{\sigma}
+     \left[
+       \nabla \cdot ((\nu+\tilde{\nu})\nabla\tilde{\nu})
+       + c_{b2}|\nabla\tilde{\nu}|^2
+     \right]
+   + c_{w1}\left(\frac{\tilde{\nu}}{d}\right)^2 ,
+
+where :math:`\Omega` is the magnitude of vorticity. This follows the
+SA-neg modification of Allmaras, Johnson, and Spalart :cite:`Allmaras2012`.
+
+For the SST model, the transported variables are :math:`\rho k` and
+:math:`\rho \omega`. The eddy viscosity is limited as
+
+.. math::
+   \mu_t =
+   \frac{\rho a_1 k}{\max(a_1\omega, S F_2)} .
+
+The source terms are
+
+.. math::
+   \frac{D(\rho k)}{Dt}
+   &=
+   P_k - \beta^* \rho k \omega
+   + \nabla \cdot ((\mu+\sigma_k\mu_t)\nabla k), \\
+   \frac{D(\rho\omega)}{Dt}
+   &=
+   \frac{\gamma}{\nu_t} P_k
+   - \beta \rho \omega^2
+   + \nabla \cdot ((\mu+\sigma_\omega\mu_t)\nabla\omega)
+   + 2(1-F_1)\rho\sigma_{\omega 2}
+     \frac{1}{\omega}\nabla k \cdot \nabla\omega .
+
+The coefficients :math:`\beta`, :math:`\gamma`, :math:`\sigma_k`, and
+:math:`\sigma_\omega` are blended with :math:`F_1` between the inner and outer
+SST constants. ``rans-kwsst-2003m`` uses the strain-rate magnitude in the
+production term, while ``rans-kwsst-v2003m`` uses the vorticity magnitude :cite:`Menter1994,Menter2003`.
+
 Axisymmetric Equations
 ----------------------
 ``pyBaram`` can solve two-dimensional no-swirl axisymmetric Euler,
@@ -213,13 +290,13 @@ conservative vector at `f`-th face of the cell.
 ``pyBaram`` computes gradient with two steps.
 
 * Compute :math:`\Delta U_{fi}` at each ``Inters`` class in :mod:`pybaram.solvers.baseadvec.inters`
-    * `make_delu` method generates loop.
-    * `construct_kernels` method of each ``Inters`` generates kernels.
+    * ``_make_delu`` method generates loop.
+    * ``construct_kernels`` method of each ``Inters`` generates kernels.
 
 * Compute :math:`\nabla U` at ``BaseAdvecElements``  class in :mod:`pybaram.solvers.baseadvec.elements`.
-    * Operation matrix :math:`M` is pre-computed at `_prelsq` method of ``BaseElements`` class
-    * `make_grad` method of the class generates loop.
-    * `construct_kernels` method of the class generates kernels.
+    * Operation matrix :math:`M` is pre-computed at ``_prelsq`` method of ``BaseElements`` class
+    * ``_make_grad`` method of the class generates loop.
+    * ``construct_kernels`` method of the class generates kernels.
 
 Slope Limiter
 -------------
@@ -227,12 +304,12 @@ In order to capture shock-wave robustly, the slope of linear reconstruction shou
 ``pyBaram`` computes MLP-u slope limiter with two steps.
 
 * Search extreme value at vertex on MLP stencil :cite:`Park2010,Park2012`
-    * `make_extv` method of each `Vertex` class in :mod:`pybaram.solvers.baseadvec.vertex` generates the loop
-    * `construct_kernels` method of the same `Vertex` class initiates kernels
+    * ``_make_extv`` method of each ``Vertex`` class in :mod:`pybaram.solvers.baseadvec.vertex` generates the loop
+    * ``construct_kernels`` method of the same ``Vertex`` class initiates kernels
 
 * Compute MLP-u1/u2 limiter :cite:`Park2010,Park2012` :math:`\phi` at each ``BaseAdvecElements`` class in :mod:`pybaram.solvers.baseadvec.elements`
-    * `make_mlp_u` method of the class generates loop
-    * `construct_kernles` method of the class initiates kernels.
+    * ``_make_mlp_u`` method of the class generates loop
+    * ``construct_kernels`` method of the class initiates kernels.
 
 
 MUSCL-type reconstruction
@@ -240,16 +317,16 @@ MUSCL-type reconstruction
 With gradient and slope limiter on each cell, the :math:`U_f^+` and :math:`U_f^-` is reconstructed linearly.
 
 * Compute MUSCL-type reconstruction :math:`U_f` at each ``BaseAdvecElements`` class in :mod:`pybaram.solvers.baseadvec.elements`
-    * `make_recon` method of the class generates loop
-    * `construct_kernles` method of the class initiates kernels.
+    * ``_make_recon`` method of the class generates loop
+    * ``construct_kernels`` method of the class initiates kernels.
 
 Convective Flux 
 ----------------
 Each ``Inters`` class in :mod:`pybaram.solvers.euler.inters` computes convective flux.
 
-* `make_flux` method generates loop to compute convective flux along the interface.
-* At `construct_kernels` method of the ``Inters`` class in :mod:`pybaram.solvers.baseadvec` generates kernels.
-* :math:`\Delta A_f, \vec{n}_f` are pre-computed and stored as `_mag_snorm` and `_vec_snorm` at ``BaseInters`` class in :mod:`pybaram.solvers.base.inters`. 
+* ``_make_flux`` method generates loop to compute convective flux along the interface.
+* The ``construct_kernels`` method of the ``Inters`` class in :mod:`pybaram.solvers.baseadvec` generates kernels.
+* :math:`\Delta A_f, \vec{n}_f` are pre-computed and stored as ``_mag_snorm`` and ``_vec_snorm`` at ``BaseInters`` class in :mod:`pybaram.solvers.base.inters`.
 * Various approximate Riemann solver :math:`H_c` are implemented in :mod:`pybaram.solvers.euler.rsolvers`. 
 
     * Roe :cite:`Roe1997`
@@ -259,13 +336,13 @@ Each ``Inters`` class in :mod:`pybaram.solvers.euler.inters` computes convective
     * AUSM+up :cite:`Liou2006`
     * HLLEM :cite:`Einfeldt1991`
     * Rusanov :cite:`rusanov1962calculation`
-*  `fpts` in each element stores :math:`U_L, U_R` before execution and saves :math:`H_c \Delta A_f` after execution.
+* ``fpts`` in each element stores :math:`U_L, U_R` before execution and saves :math:`H_c \Delta A_f` after execution.
 
 Viscous Flux
 -------------
 Each ``Inters`` class in :mod:`pybaram.solvers.navierstokes` computes viscous flux.
 
-* `make_flux` method generates loop to compute viscous flux, as well as convective flux, along the interface.
+* ``_make_flux`` method generates loop to compute viscous flux, as well as convective flux, along the interface.
 * Averaged state and gradient vectors at face are computed.
 * Viscous flux :math:`H_v` is implemented in :mod:`pybaram.solvers.navierstokes.visflux`
 
@@ -274,8 +351,8 @@ Negative Divergence of Fluxes
 After computing flux at faces, divergence of flux can be computed with finite volume method.
 
 * Compute :math:`-\frac{1}{\Delta V_i} \sum_{f} H \Delta A_f` at ``BaseAdvecElements`` class in :mod:`pybaram.solvers.baseadvec.elements`.
-    * `_make_div_upts` method of the class generates loop.
-    * `construct_kernels` method of the class generates kernels.
+    * ``_make_div_upts`` method of the class generates loop.
+    * ``construct_kernels`` method of the class generates kernels.
 
 Turbulence Models
 =================
@@ -285,7 +362,7 @@ Source terms are added after divergence of flux.
 * :mod:`pybaram.solvers.rans` module generates overall kernels to compute RANS equations
 * :mod:`pybaram.solvers.ranssa` module generates kernels for Spalart-Allmaras RANS model :cite:`Spalart1994` 
 * :mod:`pybaram.solvers.ranssaneg` module generates kernels for the negative Spalart-Allmaras RANS model :cite:`Allmaras2012`
-* :mod:`pybaram.solvers.ranskwsst` module generates kernels for SST RANS model :cite:`Menter1994` 
+* :mod:`pybaram.solvers.ranskwsst` module generates kernels for SST RANS model :cite:`Menter1994,Menter2003`
 
 Time Integration
 =================

@@ -22,7 +22,7 @@ With `Anaconda <https://www.anaconda.com/>`_ (or `Miniconda <https://docs.conda.
 
 1. Make a new environment and activate it::
 
-    user@Computer ~/pyBaram$ conda create -n pybaram
+    user@Computer ~/pyBaram$ conda create -n pybaram python=3.9
     user@Computer ~/pyBaram$ conda activate pybaram
 
 2. Install Python packages::
@@ -45,7 +45,8 @@ It is recommended to use ``virtualenv`` or ``conda`` to create a separate enviro
 
 Dependencies
 ------------
-pyBaram |version| requires Python 3.9+ and following python packages.
+pyBaram |version| requires Python 3.9 or newer and the following Python
+packages:
 
 1. `numpy` >= 1.10
 2. `numba` >= 0.5
@@ -55,30 +56,42 @@ pyBaram |version| requires Python 3.9+ and following python packages.
 6. `tqdm` >= 4.0
 7. `rich` >= 13.0
 
-The ``scipy`` package is a required dependency and is used for numerical utilities and sparse matrix operations. Mesh reordering using the reverse Cuthill-McKee algorithm is applied by default.
-
-For PETSc-based implicit relaxation, the ``petsc4py`` package is required.
-It is optional for the standard LU-SGS and block LU-SGS relaxation methods.
+Optional Python packages
+^^^^^^^^^^^^^^^^^^^^^^^^
 
 1. `petsc4py`
+2. `graph-tool`
+3. `pykdtree >= 1.3`
 
-In order to convert the mesh with CGNS format, CGNS library is required.
+The ``petsc4py`` package is required only for the ``petsc`` and ``petsc-rank``
+implicit relaxation methods. `PETSc <https://petsc.org/>`_ must use real,
+double-precision scalars.
+The ``petsc`` method uses a distributed PETSc communicator, while
+``petsc-rank`` creates an independent ``PETSc.COMM_SELF`` solver on each MPI
+rank.
 
-1. `CGNS` >= 3.4
+The ``graph-tool`` package accelerates rank coloring during mesh import and
+partitioning for the colored LU-SGS and colored block LU-SGS methods. When it
+is unavailable, pyBaram uses its built-in sequential Python implementation.
 
-To partition the mesh for parallel computation, `METIS` library is required.
+The ``pykdtree`` package accelerates wall-distance searches for RANS
+simulations. When it is unavailable, pyBaram uses its SciPy-based
+implementation.
 
-1. `METIS` >= 5.1
+Native libraries
+^^^^^^^^^^^^^^^^
+
+The ``CGNS >= 3.4`` library is required to import CGNS meshes, and
+``METIS >= 5.1`` is required to partition meshes for parallel computation.
 
 On Windows, ``pyBaram`` requires a METIS dynamic library (``metis.dll`` or
 ``libmetis.dll``); a static or import ``.lib`` file alone cannot be loaded by
 ``ctypes``. If the conda package does not provide a METIS DLL, install a
 prebuilt METIS DLL or build METIS as a shared library.
 
-To convert a solution to `Tecplot <https://www.tecplot.com/>`_ binary format, `TecIO <https://www.tecplot.com/products/tecio-library/>`_ library is required.
-If not, `Tecplot <https://www.tecplot.com/>`_ output file is written in ASCII format.
-
-1. `TecIO` == 2014
+The `TecIO <https://www.tecplot.com/products/tecio-library/>`_ 2014 library is
+required for binary Tecplot output. Without TecIO, pyBaram writes Tecplot
+output in ASCII format.
 
 ``pyBaram`` loads CGNS, METIS, and TecIO through ``ctypes``. The library search
 path can be extended with the ``PYBARAM_LIB_PATH`` environment variable. Use
@@ -95,10 +108,8 @@ On Windows::
 When running inside a conda environment, ``pyBaram`` also searches common conda
 library directories such as ``Library\bin`` on Windows.
 
-For the colored LU-SGS scheme, the ``networkx`` package can be optionally used to perform graph coloring. If ``networkx`` is available, it is used in place of coloring based on ``scipy.sparse`` utilities.
+CUDA support
+------------
 
-1. `networkx` > 3.0
- 
-For RANS simulations, distances from wall boundaries must be computed. The ``pykdtree`` package can be optionally used to accelerate this process via KD-tree searches. If ``pykdtree`` is available, it is used in place of distance computations based on ``scipy.sparse`` utilities.
-
-1. `pykdtree` >= 1.3
+The optional CUDA backend requires an NVIDIA CUDA-capable GPU and a CUDA driver
+supported by the installed version of Numba.

@@ -114,16 +114,16 @@ class BaseIntInters(BaseInters):
 
     def _compute_dxc(self, dx):
         nface, ndims = self.nfpts, self.ndims
-        lt, le, lf = self.rawlidx
-        rt, re, rf = self.rawridx
+        lidx = self.rawlidx
+        ridx = self.rawridx
 
         # Connecting vector from adjacent elements
         self._dx_adj = np.empty((ndims, nface))
 
-        def compute_dxc(i_begin, i_end, dx_adj, dxc):
+        def compute_dxc(i_begin, i_end, lidx, ridx, dx_adj, dxc):
             for idx in range(i_begin, i_end):
-                lti, lfi, lei = lt[idx], lf[idx], le[idx]
-                rti, rfi, rei = rt[idx], rf[idx], re[idx]
+                lti, lei, lfi = lidx[:, idx]
+                rti, rei, rfi = ridx[:, idx]
 
                 for jdx in range(ndims):
                     xl = dxc[lti][lfi, lei, jdx]
@@ -136,7 +136,7 @@ class BaseIntInters(BaseInters):
                     dxc[rti][rfi, rei, jdx] = -dx
 
         # Compute dx_adj
-        self.be.make_loop(nface, compute_dxc, host=True)[0](self._dx_adj, dx)
+        self.be.make_loop(nface, compute_dxc, host=True)[0](lidx, ridx, self._dx_adj, dx)
 
     def _construct_ele_graph(self, elemap, lhs, rhs):
         # Construct connectivity (fact to ele)
@@ -250,23 +250,23 @@ class BaseMPIInters(BaseInters):
         comm = MPI.COMM_WORLD
 
         nface, ndims = self.nfpts, self.ndims
-        lt, le, lf = self.rawlidx
+        lidx = self.rawlidx
         buf = np.empty((nface, ndims), dtype=np.float64)
 
         # Connecting vector from adjacent elements
         self._dx_adj = np.empty((ndims, nface))
 
-        def pack(i_begin, i_end, buf, dxc):
+        def pack(i_begin, i_end, lidx, buf, dxc):
             # Save dxc to buf for communication
             for idx in range(i_begin, i_end):
-                lti, lfi, lei = lt[idx], lf[idx], le[idx]
+                lti, lei, lfi = lidx[:, idx]
 
                 for jdx in range(ndims):
                     buf[idx, jdx] = dxc[lti][lfi, lei, jdx]
 
-        def compute_dxc(i_begin, i_end, dx_adj, buf, dxc):
+        def compute_dxc(i_begin, i_end, lidx, dx_adj, buf, dxc):
             for idx in range(i_begin, i_end):
-                lti, lfi, lei = lt[idx], lf[idx], le[idx]
+                lti, lei, lfi = lidx[:, idx]
 
                 for jdx in range(ndims):
                     xl = dxc[lti][lfi, lei, jdx]
@@ -278,10 +278,10 @@ class BaseMPIInters(BaseInters):
                     dx_adj[jdx, idx] = dx
 
         # Pack dx
-        self.be.make_loop(nface, pack, host=True)[0](buf, dx)
+        self.be.make_loop(nface, pack, host=True)[0](lidx, buf, dx)
 
         # Exchange halo
         comm.Sendrecv_replace(buf, dest=self._dest, source=self._dest)
 
         # Compute dxc
-        self.be.make_loop(nface, compute_dxc, host=True)[0](self._dx_adj, buf, dx)
+        self.be.make_loop(nface, compute_dxc, host=True)[0](lidx, self._dx_adj, buf, dx)

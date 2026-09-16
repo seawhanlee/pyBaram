@@ -22,35 +22,38 @@ class BaseAdvecDiffSystem(BaseAdvecSystem):
         self.eles.compute_fpts()
 
         if self.mpiint:
-            # Start MPI communication for Inters
-            self.mpiint.pack()
-            self.mpiint.send(q)
+            # Post receive early and prepare the send buffer.
             self.mpiint.recv(q)
+            self.mpiint.pack()
 
         # Compute Difference of solution at Inters
         self.iint.compute_delu()
         self.bint.compute_delu()
 
         if self.mpiint:
+            self.mpiint.send(q)
+
             # Finalize MPI communication
             q.sync()
 
             # Compute Difference of solution at MPI Inters
+            self.mpiint.unpack()
             self.mpiint.compute_delu()
 
         # Compute extreme values at vertex
         self.vertex.compute_extv()
 
         if self.vertex.mpi:
-            # Start MPI communication for Vertex
-            self.vertex.pack()
-            self.vertex.send(q)
+            # Post receive early and prepare the send buffer.
             self.vertex.recv(q)
+            self.vertex.pack()
 
         # Compute gradient
         self.eles.compute_grad()
 
         if self.vertex.mpi:
+            self.vertex.send(q)
+
             # Finalize MPI communication
             q.sync()
 
@@ -62,39 +65,44 @@ class BaseAdvecDiffSystem(BaseAdvecSystem):
         self.bint.compute_grad_at()
 
         if self.mpiint:
-            # Start MPI communication for gradient at Inters
-            self.mpiint.pack_grad()
-            self.mpiint.send_grad(q)
+            # Post receive early and prepare the send buffer.
             self.mpiint.recv_grad(q)
+            self.mpiint.pack_grad()
 
         # Compute slope limiter
         self.eles.compute_mlp_u()
 
         if self.mpiint:
+            self.mpiint.send_grad(q)
+
             # Finalize MPI communication
             q.sync()
 
             # Compute gradient at MPI Inters
+            self.mpiint.unpack_grad()
             self.mpiint.compute_grad_at()
 
         # Compute reconstruction
         self.eles.compute_recon()
 
         if self._is_recon and self.mpiint:
-            # Start MPI communication to exchange reconstructed values at face
-            self.mpiint.pack()
-            self.mpiint.send(q)
+            # Post receive early and prepare the send buffer.
             self.mpiint.recv(q)
+            self.mpiint.pack()
 
         # Compute flux
         self.iint.compute_flux()
         self.bint.compute_flux()
 
         if self.mpiint:
+            if self._is_recon:
+                self.mpiint.send(q)
+
             # Finalize MPI communication
             q.sync()
 
             # Compute flux at MPI Inters
+            self.mpiint.unpack()
             self.mpiint.compute_flux()
 
         # Compute divergence 

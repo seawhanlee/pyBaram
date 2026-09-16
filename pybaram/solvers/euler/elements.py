@@ -132,14 +132,7 @@ class EulerElements(BaseAdvecElements, FluidElements):
                                self.upts_in, self.dt)
 
     def _construct_impl_arrays(self, impl_op):
-        if impl_op == 'spectral-radius':
-            # Spectral radius on face
-            self.fspr = self.be.alloc_array((self.nface, self.neles))
-        elif impl_op == 'approx-jacobian':
-            # Jacobian matrix on face
-            self.jmat = self.be.alloc_array(
-                (2, self.nfvars, self.nfvars, self.nface, self.neles)
-            )
+        pass
 
     def _make_timestep(self):
         # Dimensions

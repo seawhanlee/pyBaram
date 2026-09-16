@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import os
 import numpy as np
 
 
@@ -89,7 +90,7 @@ def _compute_with_tree(be, tree, xc, xw, xwc, wdist, distf, workers=None):
     if not np.any(mask):
         return
 
-    n_neighbor = min(max(len(xwc) // 1000, 50), len(xwc))
+    n_neighbor = _estimate_n_neighbor(xw, xwc)
     _, idx = _tree_query(tree, xc[mask], workers, k=n_neighbor)
     if idx.ndim == 1:
         idx = idx[:, None]
@@ -100,6 +101,53 @@ def _compute_with_tree(be, tree, xc, xw, xwc, wdist, distf, workers=None):
     )
 
 
+def _estimate_n_neighbor(xw, xwc):
+    nwall = len(xw)
+    if nwall <= 50:
+        return nwall
+
+    #TODO: Need to refine
+    # Use a search radius 2.5 times the representative face radius.  The
+    # additional safety factor accounts for curvature and non-uniform surface
+    # meshes which are not represented by the global mean face measure.
+    beta = 2.5
+    safety = 2.0
+
+    face_radius = np.max(
+        np.linalg.norm(xw - xwc[:, None], axis=2), axis=1
+    )
+    radius95 = np.percentile(face_radius, 95)
+
+    if xw.shape[1] == 2:
+        # A 2-D wall is a line: estimate how many segments fit in a search
+        # interval whose radius is proportional to a representative segment.
+        measure = np.linalg.norm(xw[:, 1] - xw[:, 0], axis=1)
+        mean_measure = np.mean(measure)
+        estimated = (
+            safety*2*beta*radius95 / mean_measure
+            if mean_measure else np.inf
+        )
+    else:
+        # A 3-D wall is a surface: estimate how many triangles fit in a search
+        # disk whose radius is proportional to a representative triangle.
+        edge0 = xw[:, 1] - xw[:, 0]
+        edge1 = xw[:, 2] - xw[:, 0]
+        measure = 0.5*np.linalg.norm(np.cross(edge0, edge1), axis=1)
+        mean_measure = np.mean(measure)
+        estimated = (
+            safety*np.pi*(beta*radius95)**2 / mean_measure
+            if mean_measure else np.inf
+        )
+
+    # Keep the historical minimum and use the old 0.1% rule as an upper cap.
+    # Degenerate wall faces fall back to that conservative upper bound.
+    upper = max(nwall // 1000, 50)
+    if not np.isfinite(estimated):
+        return upper
+
+    return min(max(int(np.ceil(estimated)), 50), upper)
+
+
 def _tree_query(tree, x, workers=None, k=1):
     if workers is None:
         return tree.query(x, k=k)
@@ -108,7 +156,9 @@ def _tree_query(tree, x, workers=None, k=1):
 
 
 def _scipy_workers(be):
-    if be.multithread == 'single':
-        return 1
+    workers = getattr(be, 'cpu_workers', 1)
 
-    return -1
+    if workers > 0:
+        return workers
+    elif workers <= 0:
+        return -1

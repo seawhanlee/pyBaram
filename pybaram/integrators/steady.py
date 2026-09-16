@@ -316,40 +316,65 @@ class FiveStageRK(BaseSteadyIntegrator):
       
 
 class SteadyRelaxationIntegrator(BaseSteadyIntegrator):
+    """Steady integrator that delegates one pseudo-time step to relaxation."""
+
     name = None
     nreg = 2
 
     def construct_stages(self):
+        # Relaxation solvers write the assembled residual into bank 1.
         self._rhs_idx = 1
+
+        # ``name`` selects a BaseRelaxation subclass and also tells System
+        # which rank layout must be loaded before the solver is built.
         self.relaxation = get_relaxation(
             self.cfg, self, 'solver-time-integrator', name=self.name
         )
+
+        # Steady pseudo-time integration has no physical-time BDF diagonal.
         self.relaxation.build(0.0)
 
     def step(self):
+        # The selected relaxation owns residual evaluation, correction, and
+        # post-processing for one steady iteration.
         return self.relaxation.step()
 
 
 class LUSGS(SteadyRelaxationIntegrator):
+    # Rank-wide serial LU-SGS uses face spectral radii and RCM rank ordering.
     name = 'lu-sgs'
     impl_op = 'spectral-radius'
+    rank_layout_req = 'rank-order'
 
 
 class ColoredLUSGS(SteadyRelaxationIntegrator):
+    # Colors remove same-color dependencies, enabling future parallel sweeps.
     name = 'colored-lu-sgs'
     impl_op = 'spectral-radius'
+    rank_layout_req = 'rank-coloring'
 
 
 class BlockLUSGS(SteadyRelaxationIntegrator):
+    # Block LU-SGS assembles approximate face Jacobians in rank order.
     name = 'blu-sgs'
     impl_op = 'approx-jacobian'
+    rank_layout_req = 'rank-order'
 
 
 class ColoredBlockLUSGS(SteadyRelaxationIntegrator):
+    # Colored block sweeps use the same Jacobian operator with color barriers.
     name = 'colored-blu-sgs'
     impl_op = 'approx-jacobian'
+    rank_layout_req = 'rank-coloring'
 
 
 class PETSc(SteadyRelaxationIntegrator):
+    # Distributed PETSc KSP including MPI-interface matrix blocks.
     name = 'petsc'
     impl_op = 'approx-jacobian'
+    rank_layout_req = 'rank-order'
+
+
+class PETScRank(PETSc):
+    # Independent rank-local COMM_SELF PETSc KSP path.
+    name = 'petsc-rank'

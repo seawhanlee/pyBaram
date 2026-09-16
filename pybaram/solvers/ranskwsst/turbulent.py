@@ -22,7 +22,7 @@ def make_blendingF1(be, cplargs):
             w_x = (gc[i][nvars-1] - w*rho_x)/rho
             kwcross += k_x*w_x
 
-        cdkw = max(2*rho*sigmaw2/w*kwcross, 1e-20)        
+        cdkw = max(2*rho*sigmaw2/w*kwcross, 1e-10)
         term3 = 4*rho*sigmaw2*k/cdkw/d**2
 
         arg1 = min(max(term1, term2), term3)

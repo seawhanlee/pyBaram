@@ -10,14 +10,14 @@ def run(mesh, cfg, be='none', comm='none', ui='tqdm', progress_context=None,
     """
     Fresh run from mesh and configuration files.
 
-    :param mesh: pyBaram NativeReader object
-    :type mesh: pyBaram mesh
-    :param cfg: pyBaram INIFile object
-    :type cfg: config
-    :param be: pyBaram backend object
-    :type be: Backend
-    :param comm: mpi4py comm object
-    :type comm: MPI communicator
+    :param mesh: pyBaram ``NativeReader`` object
+    :type mesh: object
+    :param cfg: pyBaram ``INIFile`` object
+    :type cfg: object
+    :param be: Backend name or backend object
+    :type be: str or object
+    :param comm: mpi4py communicator
+    :type comm: object
     :param ui: progress display mode: 'tqdm', 'tui', or 'none'
     :type ui: str
     """
@@ -34,16 +34,16 @@ def restart(mesh, soln, cfg, be='none', comm='none', ui='tqdm',
     Restarted run from mesh and configuration files.
 
 
-    :param mesh: pyBaram NativeReader object
-    :type mesh: pyBaram mesh
-    :param soln: pyBaram NativeReader object
-    :type soln: pyBaram solution
-    :param cfg: pyBaram INIFile object
-    :type cfg: config
-    :param be: pyBaram backend object
-    :type be: Backend
-    :param comm: mpi4py comm object
-    :type comm: MPI communicator
+    :param mesh: pyBaram ``NativeReader`` object
+    :type mesh: object
+    :param soln: pyBaram solution ``NativeReader`` object
+    :type soln: object
+    :param cfg: pyBaram ``INIFile`` object
+    :type cfg: object
+    :param be: Backend name or backend object
+    :type be: str or object
+    :param comm: mpi4py communicator
+    :type comm: object
     :param ui: progress display mode: 'tqdm', 'tui', or 'none'
     :type ui: str
     """
@@ -65,8 +65,14 @@ def _common(msh, soln, cfg, backend, comm, ui, progress_context,
         comm = mpi_init()
 
     # Get backend
-    if backend == 'none':
+    if backend == 'none' or backend is None:
         backend = get_backend('cpu', cfg)
+    elif isinstance(backend, str):
+        bename = backend.lower()
+        if bename in ('cpu', 'cuda'):
+            backend = get_backend(bename, cfg, comm=comm)
+        else:
+            raise ValueError(f'Unsupported backend: {backend}')
 
     # Get integrator
     integrator = get_integrator(backend, cfg, msh, soln, comm)

@@ -17,13 +17,17 @@ class CPUBackend(Backend):
     """
     name = 'cpu'
 
-    def __init__(self, cfg):
+    def __init__(self, cfg, **kwargs):
+        self.comp_stream = None
+        self.copy_stream = None
+
         # Get mutli-thread type
         self.multithread = multithread = cfg.get('backend-cpu', 'multi-thread', default='single')
 
         # Loop structure for multi-thread type
         if multithread == 'single':
             self.make_loop = make_serial_loop1d
+            self.cpu_workers = 1
             
             # Enforce to disable OpenMP
             os.environ['OMP_NUM_THREADS'] = '1'
@@ -34,8 +38,9 @@ class CPUBackend(Backend):
             if multithread in ['default', 'forksafe', 'threadsafe', 'safe', 'omp', 'tbb']:
                 nb.config.THREADING_LAYER = multithread
 
-        self.reduction = np.sum     # Summation reduction
-    
+            # Follow the actual Numba thread count.
+            self.cpu_workers = nb.get_num_threads()
+
     def compile(self, func, outer=False, **kwargs):
         # JIT compile the Python function
         if self.multithread == 'single' or not outer:
@@ -59,7 +64,7 @@ class CPUBackend(Backend):
         
         return _array
 
-    def alloc_array(self, shape, dtype=np.float64, init=None, src=None, mapped=False):
+    def alloc_array(self, shape, dtype=np.float64, mapped=False, pinned=False, src=None, init=None):
         # Compatibility for GPU backend
         if mapped:
             arr = np.empty(shape, dtype)
@@ -69,10 +74,6 @@ class CPUBackend(Backend):
         
         if init is None:
             return np.empty(shape, dtype)
-        elif init == 1:
-            return np.ones(shape, dtype)
-        elif init == 0:
-            return np.zeros(shape, dtype)
         else:
             return np.full(shape, init, dtype)
     
@@ -84,12 +85,30 @@ class CPUBackend(Backend):
         # Return list of arrays
         return arrs
     
-    def reduce_array(self, nvars):
+    def make_sum_reduce(self, nvars):
         def _run(array, reduced_array):
             reduced_array[:] = np.sum(array, axis=1)
         
         return _run
 
+    def min_arrays(self, arrs):
+        return arrs.min()
+
     def wait(self):
+        # Dummy function
+        pass
+
+    def copy_array(self, *args):
+        return np.copyto
+
+    def wait_copy_stream(self):
+        # Dummy function
+        pass
+
+    def sync_comp_to_copy(self):
+        # Dummy function
+        pass
+
+    def sync_copy_to_comp(self):
         # Dummy function
         pass

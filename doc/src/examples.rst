@@ -24,19 +24,21 @@ with zero initial velocity everywhere. The procedures to obtain an unsteady solu
 
     user@Computer ~/pyBaram$ pybaram import explosion.cgns explosion.pbrm
 
-2. Partition the mesh::
+2. Run the simulation. The provided configuration enables CPU
+   multi-threading::
 
-    user@Computer ~/pyBaram$ pybaram partition <ranks> explosion.pbrm explosion_p.pbrm
+    user@Computer ~/pyBaram$ pybaram run explosion.pbrm explosion.ini
 
-3. Run the parallel simulation::
+   The explicit TVD-RK3 scheme also supports the CUDA backend. On a
+   CUDA-capable system, select it with ``-b cuda``::
 
-    user@Computer ~/pyBaram$ mpirun -n <ranks> pybaram run explosion_p.pbrm explosion.ini
+    user@Computer ~/pyBaram$ pybaram run -b cuda explosion.pbrm explosion.ini
 
-4. Convert the solution to a VTK file for visualization::
+3. Convert the solution to a VTK file for visualization::
 
-    user@Computer ~/pyBaram$ pybaram export explosion_p.pbrm out-0.25.pbrs out.vtu
+    user@Computer ~/pyBaram$ pybaram export explosion.pbrm out-0.25.pbrs out.vtu
 
-5. After visualizing the solution in ParaView, you should obtain the following result.
+4. After visualizing the solution in ParaView, you should obtain the following result.
 
 .. figure:: ./figs/explosion/Density_contour.png
    :width: 200px
@@ -68,15 +70,15 @@ A fully turbulent RANS simulation is performed under transonic conditions. The p
 
 1. Convert mesh::
 
-    user@Computer ~/pyBaram$ pybaram import rae2822.cgns rae2822.pbrm
+    user@Computer ~/pyBaram$ pybaram import rae2822.cgns rae2822.pbrmc
 
 2. Running simulations::
 
-    user@Computer ~/pyBaram$ pybaram run rae2822.pbrm rae2822.ini
+    user@Computer ~/pyBaram$ pybaram run rae2822.pbrmc rae2822.ini
 
 3. Convert the solution to a VTK file for visualization::
 
-    user@Computer ~/pyBaram$ pybaram export rae2822.pbrm out-10000.pbrs out.vtu
+    user@Computer ~/pyBaram$ pybaram export rae2822.pbrmc out-3000.pbrs out.vtu
 
 4. After visualizing the solution in ParaView, you should obtain the following result.
 
@@ -108,15 +110,15 @@ follows:
 
 1. Convert mesh::
 
-    user@Computer ~/pyBaram/examples/cylinder$ pybaram import cylinder.cgns cylinder.pbrm
+    user@Computer ~/pyBaram/examples/cylinder$ pybaram import cylinder.cgns cylinder.pbrmc
 
 2. Run the simulation::
 
-    user@Computer ~/pyBaram/examples/cylinder$ pybaram run cylinder.pbrm cylinder.ini
+    user@Computer ~/pyBaram/examples/cylinder$ pybaram run cylinder.pbrmc cylinder.ini
 
 3. Convert the solution to a VTK file for visualization::
 
-    user@Computer ~/pyBaram/examples/cylinder$ pybaram export cylinder.pbrm out-100.00.pbrs out.vtu
+    user@Computer ~/pyBaram/examples/cylinder$ pybaram export cylinder.pbrmc out-100.00.pbrs out.vtu
 
 4. After visualizing the solution in ParaView, you should obtain the following result.
 
@@ -163,7 +165,7 @@ A fully turbulent RANS simulation is performed under transonic conditions. The p
 
 4. Convert the solution to a VTK file for visualization::
 
-    user@Computer ~/pyBaram$ pybaram export oneram6_p.pbrm out-3000.pbrs out.vtu
+    user@Computer ~/pyBaram$ pybaram export oneram6_p.pbrm out-5000.pbrs out.vtu
 
 5. After visualizing the solution in ParaView, you should obtain the following result.
 
@@ -210,7 +212,7 @@ Three-dimensional simulation
 
 4. Convert the solution to a VTK file for visualization::
 
-    user@Computer ~/pyBaram$ pybaram export hb2_p.pbrm out-5000.pbrs out.vtu
+    user@Computer ~/pyBaram$ pybaram export hb2_p.pbrm out-10000.pbrs out.vtu
 
 5. After visualizing the solution in ParaView, you should obtain the following result.
 
@@ -237,12 +239,12 @@ The procedures to obtain the axisymmetric steady-state solution are as follows:
 
 1. Convert mesh::
 
-    user@Computer ~/pyBaram/examples/hb2/axi$ pybaram import hb2axi.cgns hb2axi.pbrm
+    user@Computer ~/pyBaram/examples/hb2/axi$ pybaram import hb2axi.cgns hb2axi.pbrmc
 
 2. Run the simulation::
 
-    user@Computer ~/pyBaram/examples/hb2/axi$ pybaram run hb2axi.pbrm hb2axi.ini
+    user@Computer ~/pyBaram/examples/hb2/axi$ pybaram run hb2axi.pbrmc hb2axi.ini
 
 3. Convert the solution to a VTK file for visualization::
 
-    user@Computer ~/pyBaram/examples/hb2/axi$ pybaram export hb2axi.pbrm out-10000.pbrs out.vtu
+    user@Computer ~/pyBaram/examples/hb2/axi$ pybaram export hb2axi.pbrmc out-10000.pbrs out.vtu

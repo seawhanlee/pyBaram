@@ -43,7 +43,7 @@ def make_turb_bc_far(bcargs):
     nvars = bcargs['nvars']
 
     def bc(ul, ur, nf, mu, d1):
-        rho = ul[0]
+        rho = ur[0]
         ur[nvars-2] = rho*kf
         ur[nvars-1] = rho*wf
 

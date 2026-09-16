@@ -250,16 +250,15 @@ def make_bc_sub_outmdot(bcargs):
 
     def bc(ul, ur, nf):
         ur[0] = ul[0]
-        vel = mdot / ur[0]
         pl = max((gamma - 1)*(ul[nvars-1] - 0.5 *
                               dot(ul, ul, ndims, 1, 1)/ul[0]), pmin)
 
-        ur[1] = ur[0]*vel*nb0
-        ur[2] = ur[1]*vel*nb1
+        # Momentum from mass flux per unit area and its unit direction vector
+        ur[1] = mdot*nb0
+        ur[2] = mdot*nb1
         if ndims==3:
-            ur[3] = ur[2]*vel*nb2
+            ur[3] = mdot*nb2
 
         ur[nvars-1] = pl / (gamma-1) + 0.5*dot(ur, ur, ndims, 1, 1)/ur[0]
 
     return bc
-

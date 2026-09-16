@@ -25,8 +25,11 @@ When you run ``pybaram``, following help output is given::
     -h, --help            show this help message and exit
     --verbose, -v
 
-1. ``pybaram import`` --- Convert the mesh generator output to pyBaram mesh file (``.pbrm``).    
-   pyBaram can convert `CGNS <https://cgns.github.io/>`_ mesh (``.cgns``) file or `Gmsh <http:http://gmsh.ifo/>`_ mesh file (``.msh``)
+1. ``pybaram import`` --- Convert mesh-generator output or an existing native
+   mesh to a pyBaram mesh file. The output extension selects the rank layout:
+   ``.pbrm`` stores a reverse Cuthill-McKee (RCM) rank ordering, while
+   ``.pbrmc`` stores a rank coloring required by the colored LU-SGS schemes.
+   pyBaram can convert `CGNS <https://cgns.github.io/>`_ mesh (``.cgns``) file or `Gmsh <https://gmsh.info/>`_ mesh file (``.msh``)
     
    Example::
 
@@ -36,11 +39,25 @@ When you run ``pybaram``, following help output is given::
 
        user@Computer ~/pyBaram$ pybaram import mesh.cgns mesh.pbrm -s 0.001
 
+   For colored output, select ``.pbrmc``. The ``-c`` (or
+   ``--coloring-method``) option accepts ``greedy`` (the default) or
+   ``smallest-last``::
+
+       user@Computer ~/pyBaram$ pybaram import mesh.cgns mesh.pbrmc -c smallest-last
+
+   Native ``.pbrm`` and ``.pbrmc`` inputs can also be converted between the
+   two layouts by choosing the desired output extension.
+
 2. ``pybaram partition`` --- Partition a mesh file for MPI parallel computation.
     
    Example::
 
         user@Computer ~/pyBaram$ pybaram partition <ranks> mesh.pbrm mesh_p.pbrm
+
+   The partitioned output follows the same extension rule. Use ``.pbrmc`` for
+   a colored layout and optionally select its coloring method::
+
+        user@Computer ~/pyBaram$ pybaram partition <ranks> mesh.pbrm mesh_p.pbrmc -c greedy
 
    You can also partition the solution files associated with a mesh file and save the results to a specified folder::
 
@@ -58,6 +75,11 @@ When you run ``pybaram``, following help output is given::
 
         user@Computer ~/pyBaram$ pybaram run mesh.pbrm conf.ini --ui tui
 
+   The CPU backend is used by default. Select the CUDA backend with ``-b cuda``
+   (or ``--backend cuda``)::
+
+        user@Computer ~/pyBaram$ pybaram run mesh.pbrm conf.ini -b cuda
+
    If you would like to conduct MPI parallel computation, please use ``mpirun -n <cores>`` to launch ``pybaram`` script. 
    Note that the mesh file should be partitioned by the same number of cores.
 
@@ -65,16 +87,20 @@ When you run ``pybaram``, following help output is given::
         
         user@Computer ~/pyBaram$ mpirun -np <ranks> pybaram run mesh_p.pbrm conf.ini
 
-4. ``pybaram restart`` --- Restart flow simulation with a given mesh and solution files. 
+4. ``pybaram restart`` --- Restart flow simulation with a given mesh and solution files.
    If you would like to restart with different numerical methods, please append the configuration file.
 
    Example::
         
         user@Computer ~/pyBaram$ pybaram restart mesh.pbrm sol-100.pbrs
 
-   The same progress display option is available for restarted runs::
+   Progress display options are also available for restarted simulations::
 
-        user@Computer ~/pyBaram$ pybaram restart mesh.pbrm sol-100.pbrs --ui none
+        user@Computer ~/pyBaram$ pybaram restart mesh.pbrm sol-100.pbrs --ui tui
+
+   The backend can be selected in the same way as for a fresh run::
+
+        user@Computer ~/pyBaram$ pybaram restart mesh.pbrm sol-100.pbrs -b cuda
 
 5. ``pybaram sweep`` --- Run an angle-of-attack sweep from one mesh and base
    configuration file.
@@ -123,10 +149,29 @@ When you run ``pybaram``, following help output is given::
 6. ``pybaram export`` --- Convert solution files to `VTK <https://vtk.org/>`_ unstructured grid file (``.vtu``) 
    or `Tecplot <https://www.tecplot.com/>`_ data file (``.plt``). In addition to volume export, this command can
    export solution data on a specified surface boundary and print the list of available surface names in the mesh.
-   Volume export writes primitive variables and solver auxiliary variables, such as viscosity and wall distance
-   when they are available. Surface export writes density, pressure, the face-normal vector, and, for viscous
-   systems, auxiliary variables and the wall shear rate vector. The wall shear stress vector can be obtained by
-   multiplying the wall shear rate by the viscosity.
+   The exported volume variables are:
+
+   * All systems: ``rho``, ``p``, and the velocity vector ``uv`` or ``uvw``.
+   * Navier-Stokes: the common variables plus ``mu``.
+   * Spalart-Allmaras and SA-neg: the common variables plus ``nut``, ``ydist``,
+     ``mu``, and ``mut``.
+   * All k-omega SST variants: the common variables plus ``k``, ``omega``,
+     ``ydist``, ``mu``, and ``mut``.
+
+   Surface export writes ``rho``, ``p``, and the face-normal vector ``n`` for
+   all systems. Viscous systems additionally write ``mu`` and the wall shear
+   rate vector ``wsr``; RANS systems also write ``ydist`` and ``mut``. The wall
+   shear stress vector can be obtained by multiplying ``wsr`` by ``mu``.
+
+   If any selected surface is an ``isotherm-wall``, surface export also writes
+   ``WallNormalEnthalpyGradient``. Its value is approximated from the wall
+   enthalpy ``CpTw`` on isothermal walls, set to zero on ``adia-wall``
+   boundaries, and set to ``NaN`` on other selected boundary types.
+
+   VTK output uses the display names ``Density``, ``Pressure``, ``Velocity``,
+   ``Normal``, ``WallShearRate``, and ``WallDistance`` for ``rho``, ``p``, the
+   velocity vector, ``n``, ``wsr``, and ``ydist``, respectively. Other variable
+   names are written as shown above.
 
    Example::
         
@@ -145,6 +190,61 @@ Mesh File
 ---------
 ``pyBaram`` can handle unstructured mixed elements; however, there are some limitations. Currently, only a single unstructured zone can be solved. It is important that volumes and faces are appropriately labeled. The volume label for a single zone should be set as fluid, and faces assigned for boundary conditions must have distinct labels.
 
+Mesh Formats for Implicit Schemes
+*********************************
+The output extension used by ``import`` or ``partition`` determines the
+rank-wide cell layout stored in the native mesh. The layout must match the
+implicit scheme selected in the configuration.
+
+.. list-table:: Native mesh format required by each scheme
+   :widths: 15 25 60
+   :header-rows: 1
+
+   * - Extension
+     - Rank layout
+     - Compatible schemes
+   * - ``.pbrm``
+     - RCM rank ordering
+     - ``lu-sgs``, ``blu-sgs``, ``petsc``, and ``petsc-rank``
+   * - ``.pbrmc``
+     - Rank coloring
+     - ``colored-lu-sgs`` and ``colored-blu-sgs``
+   * - Either format
+     - Layout is not used
+     - Explicit schemes: ``eulerexplicit``, ``tvd-rk3``, and ``rk5``
+
+For a steady simulation, the ``stepper`` in
+``[solver-time-integrator]`` determines the required mesh format. For example,
+``stepper = petsc`` requires ``.pbrm``, while
+``stepper = colored-blu-sgs`` requires ``.pbrmc``.
+
+For a dual-time stepping simulation, ``bdf1``, ``bdf2``, or ``bdf3`` only
+selects the physical-time formula. The mesh format is determined by ``method``
+in ``[solver-time-relaxation]``. A DTS simulation using
+``method = colored-lu-sgs`` therefore requires ``.pbrmc``; one using
+``method = lu-sgs`` or ``method = petsc`` requires ``.pbrm``.
+
+Create the format needed by the selected scheme by choosing the corresponding
+output extension::
+
+    user@Computer ~/pyBaram$ pybaram import mesh.cgns mesh.pbrm
+    user@Computer ~/pyBaram$ pybaram import mesh.cgns mesh.pbrmc -c smallest-last
+
+The same rule applies to partitioned output::
+
+    user@Computer ~/pyBaram$ pybaram partition <ranks> mesh.pbrm mesh_part.pbrm
+    user@Computer ~/pyBaram$ pybaram partition <ranks> mesh.pbrm mesh_part.pbrmc -c greedy
+
+An existing native mesh can be converted to the other layout by changing the
+output extension::
+
+    user@Computer ~/pyBaram$ pybaram import mesh.pbrm mesh.pbrmc
+
+If an implicit scheme and mesh layout do not match, pyBaram stops during
+solver initialization and reports the layout and extension required by that
+scheme. The mesh extension is therefore part of the numerical setup, not only
+a file-naming convention.
+
 
 Configuration File
 ==================
@@ -152,8 +252,15 @@ The parameters for ``pyBaram`` simulation are specified in the configuration fil
 
 Backends
 ---------
-The backend section configures how to run ``pybaram``. 
-Currently, ``pybaram`` runs only on the CPU and there is only 'backend-cpu' section.
+The execution backend is selected with ``--backend`` (or ``-b``) on the
+``run`` and ``restart`` commands. ``cpu`` is the default, and ``cuda`` selects
+the CUDA backend. Backend-specific parameters are configured in the
+``[backend-cpu]`` and ``[backend-cuda]`` sections.
+
+Explicit Runge-Kutta schemes support both OpenMP and CUDA execution. Among the
+implicit schemes, OpenMP and CUDA are supported only by ``colored-lu-sgs`` and
+``colored-blu-sgs``. The non-colored LU-SGS, block LU-SGS, and PETSc schemes
+must use the CPU backend with ``multi-thread = single``.
 
 [backend-cpu]
 *************
@@ -180,6 +287,31 @@ Example::
 
     [backend-cpu]
     multi-thread = parallel
+
+[backend-cuda]
+**************
+Parameterize the CUDA backend with:
+
+1. threads-per-block --- number of CUDA threads in each kernel block. The
+   default value is ``128``.
+
+    `int`
+
+2. cpu-workers --- number of CPU workers used by SciPy when querying the
+   wall-distance search tree for RANS simulations. By default, pyBaram divides
+   the CPUs available to the process by the number of local MPI ranks and uses
+   at least one worker per rank.
+
+    `int`
+
+With MPI, each local rank selects a CUDA device using its local rank. If there
+are more local ranks than devices, devices are assigned cyclically.
+
+Example::
+
+    [backend-cuda]
+    threads-per-block = 128
+    cpu-workers = 4
 
 Constants
 ---------
@@ -231,7 +363,7 @@ Type of equations and spatial discretization schemes are configured as follows.
 
 1. system --- type of equations. 
 
-    ``euler`` | ``navier-stokes`` | ``rans-sa`` | ``rans-sa-neg`` | ``rans-kwsst``
+    ``euler`` | ``navier-stokes`` | ``rans-sa`` | ``rans-sa-neg`` | ``rans-kwsst`` | ``rans-kwsst-2003m`` | ``rans-kwsst-v2003m``
 
     * ``rans-<model>`` --- Reynolds-averaged Navier-Stokes equation with turbulence model. 
 
@@ -239,7 +371,13 @@ Type of equations and spatial discretization schemes are configured as follows.
 
         * ``rans-sa-neg`` --- one equation Spalart-Allmaras negative model
 
-        * ``rans-kwsst`` --- two-equation :math:`k\omega`-SST model
+        * ``rans-kwsst`` --- alias for ``rans-kwsst-2003m``
+
+        * ``rans-kwsst-2003m`` --- two-equation :math:`k\omega`-SST 2003m
+          model using the strain-rate magnitude in the production term
+
+        * ``rans-kwsst-v2003m`` --- v2003m SST variant using the vorticity
+          magnitude in the production term
 
 2. order --- spatial order of accuracy.
 
@@ -249,25 +387,37 @@ Type of equations and spatial discretization schemes are configured as follows.
 
     ``hybrid`` | ``least-square`` | ``weighted-least-square`` | ``green-gauss``
 
-4. limiter --- slope limiter for shock-capturing. It is configured only if the order is 2. 
+4. hybrid-blend --- blending constant for the ``hybrid`` gradient method.
+   The default value is ``2.0``. Smaller values add more Green-Gauss blending
+   and may improve robustness on highly anisotropic unstructured meshes.
+
+    `float`
+
+5. pmin --- minimum pressure used when correcting non-physical states. The
+   default value is ``1e-15``.
+
+    `float`
+
+5. limiter --- slope limiter for shock-capturing. It is configured only if the order is 2. 
    Default value is ``none``.
 
     ``none`` | ``mlp-u1`` | ``mlp-u2``
 
-5. u2k --- tuning parameter for MLP-u2 limiter. Normally it is :math:`O(1)`.
+6. u2k --- tuning parameter for MLP-u2 limiter. Normally it is :math:`O(1)`.
 
     `float`
 
-6. riemann-solver --- scheme to compute inviscid flux at interface.
+7. riemann-solver --- scheme to compute inviscid flux at interface.
 
-    ``rusanov`` | ``roe`` | ``roem`` | ``rotated-roem`` | ``hllem`` | ``ausmpw+`` | ``ausm+up``
+    ``rusanov`` | ``roe`` | ``roem`` | ``rotated-roem`` | ``hlle`` | ``hllem`` |
+    ``ausmpw+`` | ``ausm+up`` | ``ausmzc``
 
-7. viscosity --- method to compute viscosity.
+8. viscosity --- method to compute viscosity.
    Default value is ``constant``.
 
    ``constant`` | ``sutherland``
 
-8. axisymmetric-axis --- axis of symmetry for two-dimensional no-swirl
+9. axisymmetric-axis --- axis of symmetry for two-dimensional no-swirl
    axisymmetric simulations. If this option is not specified, the problem is
    treated as a Cartesian two- or three-dimensional simulation.
 
@@ -282,17 +432,46 @@ Example::
     [solver]
     system = rans-kwsst
     order = 2
+    gradient = hybrid
+    hybrid-blend = 2.0
     limiter = mlp-u2
     u2k = 5.0
     riemann-solver = ausmpw+
     viscosity = sutherland
     axisymmetric-axis = x
 
+[solver-source-terms]
+************************
+Optional source terms for the conservative equations are configured by
+conservative-variable name. Unspecified variables use a zero source. Source
+expressions may use ``x``, ``y``, and ``z``; values from ``[constants]``; the
+conservative variables; and ``sin``, ``cos``, ``exp``, and ``tanh``.
+
+For example, a two-dimensional momentum source can be specified as::
+
+    [solver-source-terms]
+    rhou = body_force_x
+    rhov = body_force_y
+
+[solver-turbulence-coefficients]
+********************************
+This optional section overrides turbulence-model constants. Unspecified
+coefficients retain their model defaults.
+
+* Spalart-Allmaras: ``cv1 = 7.1``, ``cb1 = 0.1355``, ``cb2 = 0.622``,
+  ``sigma = 2/3``, ``kappa = 0.41``, ``cw2 = 0.3``, ``cw3 = 2``,
+  ``ct3 = 1.2``, and ``ct4 = 0.5``.
+* Negative Spalart-Allmaras additionally uses ``cn1 = 16``.
+* k-omega SST: ``sigmak1 = 0.85``, ``sigmaw1 = 0.5``, ``beta1 = 0.075``,
+  ``sigmak2 = 1.0``, ``sigmaw2 = 0.856``, ``beta2 = 0.0828``,
+  ``betast = 0.09``, ``kappa = 0.41``, ``a1 = 0.31``,
+  ``tgamma1 = 5/9``, ``tgamma2 = 0.44``, and ``mut_limit = 1e5``.
+
 [solver-viscosity-sutherland]
 *****************************
 The parameters associated with Sutherland's law can be configured as follows:
 
-1. muref --- Reference viscosity of the problem. See the `note <https://turbmodels.larc.nasa.gov/Papers/sutherland_notes_cfl3d_fun3d.pdf>`_
+1. muref --- Reference viscosity of the problem. See the `note <https://tmbwg.github.io/turbmodels/Papers/sutherland_notes_cfl3d_fun3d.pdf>`_
 
     `float`
 
@@ -377,7 +556,7 @@ Time integration, relaxation, and dual-time stepping parameters are configured.
 
    For ``steady`` simulation, following options can be selected.
 
-    ``eulerexplicit`` | ``tvd-rk3`` | ``rk5`` | ``lu-sgs`` | ``colored-lu-sgs`` | ``blu-sgs`` | ``colored-blu-sgs`` | ``petsc``
+    ``eulerexplicit`` | ``tvd-rk3`` | ``rk5`` | ``lu-sgs`` | ``colored-lu-sgs`` | ``blu-sgs`` | ``colored-blu-sgs`` | ``petsc`` | ``petsc-rank``
 
    For ``unsteady-dts`` simulation, following options can be selected.
 
@@ -387,11 +566,27 @@ Time integration, relaxation, and dual-time stepping parameters are configured.
    until enough physical-time history is available: ``bdf2`` starts with BDF1,
    and ``bdf3`` starts with BDF1 and then BDF2.
 
-    * ``lu-sgs``, ``blu-sgs``, ``petsc`` --- These schemes work only if
-      disabling multi-threading layer (``single``).
+    * Explicit Runge-Kutta schemes support OpenMP and CUDA. Among the implicit
+      schemes, only ``colored-lu-sgs`` and ``colored-blu-sgs`` support OpenMP
+      and CUDA.
 
-    * ``petsc`` --- PETSc KSP-based implicit relaxation. This method requires
-      ``petsc4py``.
+    * ``lu-sgs``, ``blu-sgs``, ``petsc``, ``petsc-rank`` --- These schemes
+      require the CPU backend with the multi-threading layer disabled
+      (``multi-thread = single``).
+
+    * ``petsc`` --- One distributed PETSc KSP containing MPI-interface
+      couplings. This is the default PETSc path for parallel simulations.
+
+    * ``petsc-rank`` --- An independent ``PETSc.COMM_SELF`` KSP on each MPI
+      rank. It retains the rank-local solve path for comparison or tuning.
+
+      Both PETSc methods require ``petsc4py`` and a real, double-precision
+      PETSc build.
+
+   Implicit steppers also require a matching native mesh layout. The
+   non-colored LU-SGS, block LU-SGS, and PETSc steppers use ``.pbrm``;
+   colored LU-SGS and colored block LU-SGS use ``.pbrmc``. See
+   `Mesh Formats for Implicit Schemes`_ for the complete mapping.
 
 6. time --- initial and the last physical time for ``unsteady`` and ``unsteady-dts`` simulations.
 
@@ -405,34 +600,35 @@ Time integration, relaxation, and dual-time stepping parameters are configured.
 
     `float`
 
-9. res-var --- the residual variable to apply tolerance stopping criteria. 
+9. res-var --- the residual variable to apply tolerance stopping criteria.
    The variable should be selected among the conservative variables. 
    Default variable is ``rho``.
 
     `string`
 
-10. sub-cfl --- pseudo-time CFL number for ``unsteady-dts`` simulation.
+10. res-norm --- whether steady residuals are normalized by their initial
+    values. The default is ``true``. Set it to ``false`` or ``no`` to use
+    absolute residuals for reporting and the ``tolerance`` check.
+
+     `boolean`
+
+11. sub-cfl --- pseudo-time CFL number for ``unsteady-dts`` simulation.
 
      `float`
 
-11. sub-iter --- The maximum iteration number for sub-iteration process.
+12. sub-iter --- The maximum iteration number for sub-iteration process.
     For ``unsteady-dts`` simulation, this is the maximum number of pseudo-time
     sub-iterations per physical time step.
 
      `int`
 
-12. sub-tol --- The stopping criteria for sub-iteration.
+13. sub-tol --- The stopping criteria for sub-iteration.
     For ``unsteady-dts`` simulation, this is applied to pseudo-time convergence
     within each physical time step.
 
      `float`
 
-13. coloring --- the coloring strategy for colored LU-SGS scheme provided in `networkx.greedy_color` algorithm.
-    Default variable is `largest_first`.
-
-     `string`
-
-14. turb-cfl-factor --- The factor of the pseudo-time ``cfl`` number for turbulent equations with respect to that of flow equations. 
+14. turb-cfl-factor --- The factor of the pseudo-time ``cfl`` number for turbulent equations with respect to that of flow equations.
     It adjusts the pseudo time for turbulence equations to alleviate numerical difficulties. The default value is 1.0.
 
      `float`
@@ -447,7 +643,8 @@ Time integration, relaxation, and dual-time stepping parameters are configured.
 
     * ``none`` --- No viscous flux Jacobian imported. This type can cause convergence delay.
 
-    * Applicable methods --- ``jacobi``, ``blu-sgs``, ``colored-blu-sgs``, ``petsc``
+    * Applicable methods --- ``blu-sgs``, ``colored-blu-sgs``, ``petsc``,
+      ``petsc-rank``
 
 Example for unsteady simulation::
 
@@ -507,7 +704,12 @@ Pseudo-time relaxation method for ``unsteady-dts`` simulations is configured.
 
 1. method --- relaxation method for pseudo-time sub-iterations.
 
-    ``lu-sgs`` | ``colored-lu-sgs`` | ``blu-sgs`` | ``colored-blu-sgs`` | ``petsc``
+    ``lu-sgs`` | ``colored-lu-sgs`` | ``blu-sgs`` | ``colored-blu-sgs`` | ``petsc`` | ``petsc-rank``
+
+   This method determines the mesh format required by a dual-time stepping
+   simulation. Non-colored and PETSc methods require ``.pbrm``; colored
+   methods require ``.pbrmc``. The outer ``bdf1``, ``bdf2``, or ``bdf3``
+   stepper does not change this requirement.
 
 2. sub-iter --- the maximum iteration number for block LU-SGS sub-iteration process.
 
@@ -523,8 +725,11 @@ Pseudo-time relaxation method for ``unsteady-dts`` simulations is configured.
 
 [solver-petsc]
 **************
-PETSc KSP options are configured when ``petsc`` is selected as a steady
-``stepper`` or as a dual-time stepping relaxation ``method``.
+PETSc KSP options are configured when ``petsc`` or ``petsc-rank`` is selected
+as a steady ``stepper`` or as a dual-time stepping relaxation ``method``.
+``petsc`` assembles one distributed BSR operator whose off-rank columns include
+MPI-interface cell couplings. ``petsc-rank`` instead creates one independent
+rank-local BSR operator per process.
 
 1. ksp --- PETSc Krylov solver type.
 
@@ -538,6 +743,11 @@ PETSc KSP options are configured when ``petsc`` is selected as a steady
     `string`
 
    The default value is ``ilu``.
+
+   For a parallel global ``petsc`` solve, an ``ilu`` request is implemented
+   as zero-overlap additive Schwarz (ASM) with an ILU sub-solver on each rank,
+   because PETSc ILU itself is sequential. Other PETSc preconditioner names
+   are passed directly to PETSc.
 
 3. pc-factor-levels --- PETSc factor fill level for ILU-like
    preconditioners.
@@ -563,6 +773,12 @@ PETSc KSP options are configured when ``petsc`` is selected as a steady
     `float`
 
    The default value is ``1e-15``.
+
+7. ksp-divergence --- action when PETSc reports a negative convergence reason.
+
+    ``ignore`` | ``warn`` | ``raise``
+
+   The default value is ``warn``.
 
 Example for dual-time stepping with PETSc KSP relaxation::
 
@@ -682,21 +898,22 @@ Examples::
     v = uf*sin(aoa/180*pi)
     p = pf
 
-In this, examples, ``rhof``, ``uf``, ``pf`` and ``aoa`` are assigned at ``[constants]`` section.
+In this example, ``rhof``, ``uf``, ``pf``, and ``aoa`` are assigned in the
+``[constants]`` section.
 
 [soln-bcs-`name`]
 *****************
-The boundary conditions for the label `name` is configured. 
-The label should be same as the mesh file (``.pbrm``).
+The boundary condition for the label ``name`` is configured here. The label
+must match a boundary name in the native mesh (``.pbrm`` or ``.pbrmc``).
 
 1. type --- type of boundary condition.
    To solve Euler system, following types can be used.
 
-     ``slip-wall`` | ``sup-out`` | ``sup-in`` | ``sub-outp`` | ``far`` 
+     ``slip-wall`` | ``sup-out`` | ``sup-in`` | ``sub-outp`` | ``sub-outmdot`` | ``sub-inv`` | ``sub-inptt`` | ``far``
 
    To solve Navier-Stokes or RANS system, following types can be used.
 
-     ``slip-wall`` | ``adia-wall`` | ``isotherm-wall`` | ``sup-out`` | ``sup-in`` | ``sub-outp`` | ``sub-inv`` |  ``far`` 
+     ``slip-wall`` | ``adia-wall`` | ``isotherm-wall`` | ``sup-out`` | ``sup-in`` | ``sub-outp`` | ``sub-inv`` | ``sub-inptt`` | ``far``
 
 The details of type and required variables are summarized as follows.
 
@@ -717,6 +934,13 @@ The details of type and required variables are summarized as follows.
 * ``sub-outp`` --- subsonic outlet boundary condition with back pressure
 
     * ``p`` --- back pressure
+
+* ``sub-outmdot`` --- Euler subsonic outlet boundary condition with a specified
+  mass flow rate
+
+    * ``mdot`` --- mass flow rate per unit boundary area
+
+    * ``dir`` --- components of the unit vector in the flow direction
 
 * ``sub-inv`` --- subsonic inlet boundary condition with velocity
 
@@ -760,14 +984,15 @@ Plugins in ``pyBaram`` serve as post-processing modules after iterations. If a p
 *******************
 The `stats` plugin writes a fundamental log file. For unsteady simulations, it includes time and time step information for each iteration. In steady simulations, it records the residuals of all conservative variables.
 
-1. ``flushsteps`` --- flush to file for every `flushstep`. Default value is 500.
+1. ``flushsteps`` --- flush to the file every ``flushsteps`` iterations. The
+   default value is ``500``.
 
 2. ``name`` --- file name. If a file format is not assigned, `csv` format will be used by default. Default name is `stats.csv`
 
 Examples::
     
     [soln-plugin-stats]
-    flushstep = 300
+    flushsteps = 300
 
 
 [soln-plugin-writer]
@@ -776,7 +1001,12 @@ This plugin writes the solution file.
 
 1. ``name`` --- file name. In the name, {n} replaces iteration number and {t} replaces time.
 
-2. ``iter-out`` --- write solution file for every `iter-out`.
+2. ``iter-out`` --- write a solution file every ``iter-out`` iterations for a
+   steady simulation. The default value is ``100``.
+
+3. ``dt-out`` --- physical-time interval between solution files for
+   ``unsteady`` and ``unsteady-dts`` simulations. This option is required in
+   those modes.
 
 Examples::
     
@@ -794,11 +1024,13 @@ radian in the azimuthal direction. The reference ``area`` should also correspond
 to one radian. Multiply the resulting dimensional force or moment by
 :math:`2\pi` to obtain the full revolved-surface value.
 
-1. ``iter-out`` --- compute forces for every `iter-out` for steady simulation
+1. ``iter-out`` --- compute force and moment values every ``iter-out`` iterations for a
+   steady simulation.
 
     `int`
 
-2. ``dt-out`` --- compute forces for every `dt-out` for unsteady simulation
+2. ``dt-out`` --- compute force and moment values every ``dt-out`` units of physical
+   time for an unsteady simulation.
 
     `float`
 
@@ -828,7 +1060,7 @@ to one radian. Multiply the resulting dimensional force or moment by
     `characters`
 
 9. ``force-dir-`` `character` --- component of force direction vector of each subscript `character`. 
-   The dimension of this vector should same as the dimension of space.
+   The dimension of this vector should be the same as the spatial dimension.
 
     `float`, `float`, ( `float` )
 
@@ -869,11 +1101,13 @@ For axisymmetric simulations, the reported integrated value is over one radian
 in the azimuthal direction. Multiply by :math:`2\pi` to obtain the full
 revolved-surface integral.
 
-1. ``iter-out`` --- compute forces for every `iter-out` for steady simulation
+1. ``iter-out`` --- compute surface values every ``iter-out`` iterations for a
+   steady simulation.
 
     `int`
 
-2. ``dt-out`` --- compute forces for every `dt-out` for unsteady simulation
+2. ``dt-out`` --- compute surface values every ``dt-out`` units of physical
+   time for an unsteady simulation.
 
     `float`
 
@@ -892,11 +1126,13 @@ Examples::
     p0 = p*(1+ (gamma-1)/2*(u**2 + v**2)/(gamma*p/rho))**(gamma/(gamma-1))
     mdot = rho*(u*nx+v*ny)
 
-In this example, total pressure (:math:`p_0`) and mass flow rate (:math:`\dot{m}`) is computed.
+In this example, total pressure (:math:`p_0`) and mass flow rate
+(:math:`\dot{m}`) are computed.
 
 API
 ===
-pyBaram provides an API for handling I/O and conducting simulations. Currently, only CLI (command line interface) functions are implemented. The basic usage is described as follows:
+pyBaram provides Python APIs for mesh and solution I/O and for running or
+restarting simulations. The CLI commands are implemented using these APIs.
 
 .. automodule:: pybaram.api.io
     :members:

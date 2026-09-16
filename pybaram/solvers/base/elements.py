@@ -51,81 +51,6 @@ class BaseElements:
         self._axisymmetric_axis_idx = 'xy'.index(axis)
         self._axisymmetric_radius_idx = 1 - self._axisymmetric_axis_idx
 
-    def coloring(self):
-        try:
-            # Greedy coloring
-            strategy = self.cfg.get('solver-time-integrator', 'coloring', 'none')
-
-            if strategy == 'none':
-                color = self._coloring_greedy()
-            else:
-                color = self._coloring_nx(strategy)
-        except:
-            color = self._coloring_greedy()
-
-         # Save colors as linked-list
-        ncolor = np.cumsum([sum(color==i) for i in range(color.max()+1)])
-        icolor = np.argsort(color)
-
-        return ncolor, icolor, color
-
-    def _coloring_nx(self, strategy):
-        import networkx as nx
-
-        # Multi-Coloring (greedy)
-        graph = self.graph
-        indptr  = graph['indptr']
-        indices = graph['indices']
-
-        # Build graph
-        G = nx.Graph()
-
-        # Add connectivity (edge)
-        for row in range(len(indptr) - 1):
-            start = indptr[row]
-            end = indptr[row + 1]
-            cols = indices[start:end]
-
-            for col in cols:
-                G.add_edge(row, col)
-
-        # Greedy coloring
-        col_dict = nx.greedy_color(G, strategy=strategy)
-        color = np.array([col_dict[k] for k in sorted(col_dict)]) + 1
-
-        return color       
-
-    def _coloring_greedy(self):
-        # Multi-Coloring (greedy)
-        graph = self.graph
-        indptr  = graph['indptr']
-        indices = graph['indices']
-
-        degrees = np.diff(indptr)
-        xn = np.sum(self.xc, axis=1)
-
-        color = np.zeros(self.neles, dtype=int)
-        avail_colors = set(range(1, max(degrees)+2))
-        nei_colors = np.empty(max(degrees)+1, dtype=int)
-
-        # Search Coloring (Search along hyperplane and max degrees)
-        for idx in np.lexsort([xn, -degrees]):
-            # Seach colors of neighboring cells
-            n = 0
-            for jdx in range(indptr[idx], indptr[idx+1]):                
-                nei = indices[jdx]
-                nei_color = color[nei]
-
-                if nei_color > 0:
-                    nei_colors[n] = nei_color
-                    n += 1
-
-            # Find current color (greedy)
-            c = min(avail_colors - set(nei_colors[:n]))
-            color[idx] = c
-
-        return color
-
     def set_ics_from_cfg(self):
         xc = self.geom.xc(self.eles).T
 
@@ -288,7 +213,11 @@ class BaseElements:
 
             # Compute blending function (GLSQ)
             ar = 2*np.linalg.norm(self.dxf, axis=1).max(axis=0)*snorm_mag.max(axis=0)/vol
-            beta = np.minimum(1, 2/ar)
+
+            # Shima's GLSQ uses 2.0. Lower values add more Green-Gauss blending.
+            hybrid_blend = self.cfg.getfloat('solver', 'hybrid-blend', 2.0)
+                
+            beta = np.minimum(1, hybrid_blend/ar)
             is_wlsq = True
         else:
             raise ValueError("Invalid gradient method : ", self._grad_method)

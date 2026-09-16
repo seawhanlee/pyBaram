@@ -13,6 +13,16 @@ and may include changes that are not present upstream, such as release automatio
 and terminal UI improvements. When citing pyBaram or looking for the original
 project context, refer to the upstream project and the paper listed below.
 
+Upstream synchronization
+------------------------
+Fork version `0.11.0` incorporates upstream [v0.8.0](https://gitlab.com/aadl_inha/pyBaram/-/tags/v0.8.0)
+(commit `a423cfa68b5d4053c8e5fee605d2a54076b54daf`), preserving the Rich TUI,
+CLI progress options, and resumable AOA sweeps. New upstream features include
+the CUDA backend, solver improvements, and rank-ordered/colored mesh layouts.
+Use `--backend cpu` (default) or `--backend cuda` with `run` and `restart`;
+AOA sweeps continue to use the CPU backend. See the user guide for mesh layout
+requirements for implicit schemes.
+
 Overview
 ---------
 pyBaram is an open-source, Python-based software designed to solve compressible flows using the finite volume method on unstructured grids. 'Baram' translates to 'Wind' in Korean. The software supports the simulation of compressible inviscid, laminar, and turbulent flows based on the Reynolds-averaged Navier-Stokes (RANS) models. All the code is written in Python, and hybrid parallel simulations are implemented using high-performance Python packages.
@@ -31,14 +41,14 @@ conda create -n pybaram -c conda-forge \
 conda activate pybaram
 ```
 
-Then install the latest pyBaram release wheel from this fork:
+The previously published `0.10.0` release wheel remains available:
 
 ```bash
 python -m pip install \
   https://github.com/seawhanlee/pyBaram/releases/download/v0.10.0/pybaram-0.10.0-py3-none-any.whl
 ```
 
-If you prefer to work from a local checkout, create and activate the same Conda
+To use version `0.11.0` from this checkout, create and activate the same Conda
 environment first, then install from source:
 
 ```bash
@@ -158,6 +168,8 @@ Examples of using pyBaram are available in the examples directory. Currently ava
 - 3D Inviscid spherical explosion problem
 
 - 2D transonic turbulent flow over RAE2822 airfoil
+
+- 2D unsteady laminar flow around a circular cylinder
 
 - 3D transonic turbulent flow over ONERA M6 wing
 

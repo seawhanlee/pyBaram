@@ -92,6 +92,56 @@ class MetaKernel:
             kern.__call__(*args)
 
 
+class MPIPackKernel:
+    """
+    Prepare an MPI send buffer.
+
+    Runs the data pack kernel on the compute stream, then optionally copies the
+    packed device buffer to the host send buffer on the copy stream.
+    """
+    def __init__(self, be, pack, dtoh=NullKernel()):
+        self.be = be
+        self.pack = pack
+        self.dtoh = dtoh
+
+    def __call__(self, *args):
+        self.pack(*args)
+        self.be.sync_comp_to_copy()
+        self.dtoh()
+
+
+class MPIUnpackKernel:
+    """
+    Reflect an MPI receive buffer into backend-local storage.
+
+    For CUDA this first copies the host receive buffer to the device receive
+    buffer, then runs any data unpack kernel after the copy is visible.
+    """
+    def __init__(self, be, htod=NullKernel(), unpack=NullKernel()):
+        self.be = be
+        self.htod = htod
+        self.unpack = unpack
+
+    def __call__(self, *args):
+        self.htod()
+        self.be.sync_copy_to_comp()
+        self.unpack(*args)
+
+
+class MPISendKernel:
+    """
+    Start an MPI send after the backend copy stream has made the host buffer
+    visible to MPI.
+    """
+    def __init__(self, be, send):
+        self.be = be
+        self.send = send
+
+    def __call__(self, *args):
+        self.be.wait_copy_stream()
+        return self.send(*args)
+
+
 class Queue:
     """
     Simple Queue

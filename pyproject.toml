@@ -37,6 +37,7 @@ packages = [
     'pybaram.api',
     'pybaram.backends',
     'pybaram.backends.cpu',
+    'pybaram.backends.cuda',
     'pybaram.integrators',
     'pybaram.partitions',
     'pybaram.plugins',
