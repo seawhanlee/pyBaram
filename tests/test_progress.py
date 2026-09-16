@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 import io
+import os
+import stat
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from contextlib import redirect_stdout
 
@@ -10,6 +12,7 @@ from pybaram.api.progress import (
     RichProgressHandler,
     _HalfSplit,
     _format_remaining,
+    _mpi_terminal_width,
     _split_widths,
     add_progress_handler,
     progress_snapshot
@@ -145,7 +148,78 @@ class RemainingTimeTest(unittest.TestCase):
         self.assertEqual(_format_remaining(30, 0, 0), 'unknown')
 
 
+class MPITerminalTest(unittest.TestCase):
+    def probe(self, mode=stat.S_IFCHR, inaccessible=False, width=120):
+        def read_proc(path):
+            if inaccessible:
+                raise PermissionError('proc unavailable')
+            return {
+                '/proc/100/comm': 'hydra_pmi_proxy\n',
+                '/proc/100/stat': '100 (hydra_pmi_proxy) S 90 0',
+                '/proc/90/comm': 'mpirun\n',
+            }[str(path)]
+
+        with patch.dict(os.environ, {'PMI_RANK': '0', 'TERM': 'xterm'}, clear=True), \
+             patch('sys.platform', 'linux'), \
+             patch('os.getppid', return_value=100), \
+             patch('pathlib.Path.read_text', read_proc), \
+             patch('pathlib.Path.stat', return_value=Mock(st_mode=mode)), \
+             patch('os.open', return_value=9) as opened, \
+             patch('os.isatty', return_value=True), \
+             patch('os.get_terminal_size', return_value=os.terminal_size((width, 40))), \
+             patch('os.close') as closed:
+            width = _mpi_terminal_width()
+            if width is not None:
+                closed.assert_called_once_with(9)
+            else:
+                opened.assert_not_called()
+            return width
+
+    def test_mpi_pipe_uses_launchers_terminal_width(self):
+        self.assertEqual(self.probe(), 120)
+
+    def test_unsized_pty_uses_default_width(self):
+        self.assertEqual(self.probe(width=0), 80)
+
+    def test_redirected_launcher_does_not_inherit_shell_terminal(self):
+        self.assertIsNone(self.probe(mode=stat.S_IFREG))
+        self.assertIsNone(self.probe(mode=stat.S_IFIFO))
+
+    def test_inaccessible_proc_falls_back_to_nonterminal(self):
+        self.assertIsNone(self.probe(inaccessible=True))
+
+    def test_non_mpi_or_dumb_terminal_does_not_probe(self):
+        for env in ({}, {'PMI_RANK': '0', 'TERM': 'dumb'}):
+            with patch.dict(os.environ, env, clear=True), \
+                 patch('os.getppid') as parent:
+                self.assertIsNone(_mpi_terminal_width())
+                parent.assert_not_called()
+
+
 class RichOutputTest(unittest.TestCase):
+    def test_mpi_forwarded_output_refreshes_before_completion(self):
+        from rich.console import Console
+
+        out = io.StringIO()
+
+        def console_factory(**kwargs):
+            return Console(file=out, **{k: v for k, v in kwargs.items() if k != 'stderr'})
+
+        with patch('rich.console.Console', side_effect=console_factory), \
+             patch('pybaram.api.progress._mpi_terminal_width', return_value=120):
+            intg = self.make_integrator()
+            handler = add_progress_handler(intg, FakeComm(0))
+        try:
+            handler.start()
+            intg.iter = 5
+            handler(intg)
+            handler._live.refresh()
+            self.assertTrue(handler._interactive)
+            self.assertIn('5/10', out.getvalue())
+            self.assertEqual(handler._console.width, 120)
+        finally:
+            handler.stop()
+
     def make_integrator(self, mode='steady'):
         intg = FakeIntegrator()
         intg.mode = mode

@@ -15,7 +15,7 @@ project context, refer to the upstream project and the paper listed below.
 
 Upstream synchronization
 ------------------------
-Fork version `0.12.0` incorporates upstream [v0.8.0](https://gitlab.com/aadl_inha/pyBaram/-/tags/v0.8.0)
+Fork version `0.12.1` incorporates upstream [v0.8.0](https://gitlab.com/aadl_inha/pyBaram/-/tags/v0.8.0)
 (commit `a423cfa68b5d4053c8e5fee605d2a54076b54daf`), preserving the Rich CLI,
 CLI progress options, and resumable AOA sweeps. New upstream features include
 the CUDA backend, solver improvements, and rank-ordered/colored mesh layouts.
@@ -48,7 +48,7 @@ python -m pip install \
   https://github.com/seawhanlee/pyBaram/releases/download/v0.10.0/pybaram-0.10.0-py3-none-any.whl
 ```
 
-To use version `0.12.0` from this checkout, create and activate the same Conda
+To use version `0.12.1` from this checkout, create and activate the same Conda
 environment first, then install from source:
 
 ```bash
@@ -94,7 +94,9 @@ The former `tui` and `tqdm` option values are no longer accepted. Remove those
 options or replace them with `--ui rich`. Python APIs accept `ui="rich"` or
 `ui="none"` as well.
 
-Only MPI rank 0 renders progress. Interactive terminals refresh live; redirected
+Only MPI rank 0 renders progress. On Linux, a local MPI launcher’s terminal is
+also detected when MPI forwards rank output through pipes. Interactive terminals
+refresh live; redirected
 output and other non-terminal streams receive the final Rich status without
 terminal control sequences. Sweeps print a status at the end of each executed
 AOA case. Use `--ui none` to suppress this output.

@@ -1,10 +1,52 @@
 # -*- coding: utf-8 -*-
+import os
+import stat
 import sys
 
+from pathlib import Path
 from time import perf_counter
 
 
 _UI_CHOICES = {"rich", "none"}
+
+
+def _mpi_terminal_width():
+    """Find a local MPI launcher's terminal when rank stderr is a pipe.
+
+    MPICH/Hydra forwards rank output through pipes even in interactive runs.
+    Inspect only the nearest known launcher: a redirected launcher must not
+    inherit terminal status from an interactive shell further up the tree.
+    Missing /proc access or a remote launcher leaves normal Rich detection in
+    charge. Never write directly to the launcher's terminal.
+    """
+    if sys.platform != 'linux' or os.environ.get('TERM') in ('dumb', 'unknown'):
+        return None
+    if not any(key in os.environ for key in (
+            'PMI_RANK', 'PMIX_RANK', 'OMPI_COMM_WORLD_RANK')):
+        return None
+
+    launchers = {'mpirun', 'mpiexec', 'mpiexec.hydra', 'orterun', 'prterun', 'srun'}
+    pid = os.getppid()
+    try:
+        for _ in range(32):
+            if pid <= 1:
+                break
+            proc = Path('/proc') / str(pid)
+            if (proc / 'comm').read_text().strip() in launchers:
+                stderr = proc / 'fd/2'
+                if not stat.S_ISCHR(stderr.stat().st_mode):
+                    return None
+                fd = os.open(stderr, os.O_RDONLY | os.O_NOCTTY | os.O_NONBLOCK)
+                try:
+                    if os.isatty(fd):
+                        return os.get_terminal_size(fd).columns or 80
+                finally:
+                    os.close(fd)
+                return None
+            pid = int((proc / 'stat').read_text().rsplit(')', 1)[1].split()[1])
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
 
 
 def add_progress_handler(integrator, comm, ui="rich", context=None):
@@ -80,6 +122,10 @@ class RichProgressHandler:
             return
 
         self._console = Console(stderr=True)
+        if not self._console.is_terminal:
+            width = _mpi_terminal_width()
+            if width is not None:
+                self._console = Console(stderr=True, force_terminal=True, width=width)
         self._interactive = self._console.is_terminal
         self._key_reader = (
             _SweepKeyReader(context)
