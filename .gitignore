@@ -1,2 +1,6 @@
 # Local NACA2412 simulation case
 /subsonic_inviscid_naca2412/
+
+# Python bytecode caches
+__pycache__/
+*.py[cod]

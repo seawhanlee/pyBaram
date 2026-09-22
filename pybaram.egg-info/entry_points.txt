@@ -1,0 +1,2 @@
+[console_scripts]
+pybaram = pybaram.__main__:main

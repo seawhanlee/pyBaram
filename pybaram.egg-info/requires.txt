@@ -1,0 +1,6 @@
+h5py>=2.6
+mpi4py>=2.0
+numpy>=1.10
+numba>=0.5
+rich>=13.0
+scipy>=1.6
