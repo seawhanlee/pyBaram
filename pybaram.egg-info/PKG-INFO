@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: pybaram
-Version: 0.12.1
+Version: 0.12.2
 Summary: Compressible CFD solver in Python
 Author-email: Jin Seok Park <jinseok.park@inha.ac.kr>, Namhyoung Kim <knhkse@inha.edu>, Chaewon Jeong <won0407@inha.edu>
 License: BSD 3-Clause License
