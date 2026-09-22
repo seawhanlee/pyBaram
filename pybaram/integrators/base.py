@@ -47,6 +47,9 @@ class BaseIntegrator:
                 # Initiate plugin object and save it to handler
                 plugins.append(get_plugin(name, self, cfg, suffix))
 
+    def _check_stop(self):
+        """Optional cancellation hook installed by the simulation API."""
+
     def _make_stage_expr(self, args):
         # Generate formulation of each RK stage.
         return '+'.join(

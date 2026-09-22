@@ -95,6 +95,7 @@ class BaseUnsteadyIntegrator(BaseIntegrator):
 
     def advance_to(self, ttag):
         while self.tcurr < ttag:
+            self._check_stop()
             # Compute dt
             self.dt = dt = self._timestep(ttag)
 

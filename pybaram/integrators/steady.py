@@ -114,6 +114,7 @@ class BaseSteadyIntegrator(BaseIntegrator):
             return
 
         while self.iter < self.itermax:
+            self._check_stop()
             # Compute dt
             self._local_dt()
 

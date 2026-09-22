@@ -85,6 +85,12 @@ pybaram restart mesh.pbrm solution.pbrs --ui rich
 mpirun -n 2 pybaram run partitioned-mesh.pbrm config.ini
 ```
 
+Press `q` during a simulation to stop at the next iteration boundary (including
+all MPI ranks). This also stops the remaining cases in a sweep. With MPI launchers
+that forward line-buffered input, press `q` followed by Enter. Existing output
+files are retained; cancellation does not force a new solution checkpoint.
+Python API callers can catch `pybaram.api.stop.SimulationStopped`.
+
 Available progress modes are:
 
 - `rich` (default): progress, iteration/time, residual, CFL, and available solver status

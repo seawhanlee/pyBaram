@@ -224,7 +224,12 @@ def main(argv=None):
 
     # Invoke the process method
     if hasattr(args, 'process'):
-        return args.process(args)
+        from pybaram.api.stop import SimulationStopped
+
+        try:
+            return args.process(args)
+        except SimulationStopped:
+            return None
     else:
         ap.print_help()
         return None

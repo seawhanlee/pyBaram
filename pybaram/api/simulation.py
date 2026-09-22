@@ -3,6 +3,7 @@ from pybaram.backends import get_backend
 from pybaram.integrators import get_integrator
 from pybaram.api.progress import add_progress_handler
 from pybaram.utils.mpi import mpi_init
+from pybaram.api.stop import KeyboardStop, SimulationStopped
 
 
 def run(mesh, cfg, be='none', comm='none', ui='rich', progress_context=None,
@@ -83,7 +84,14 @@ def _common(msh, soln, cfg, backend, comm, ui, progress_context,
 
     try:
         progress.start()
-        integrator.run()
+        stop = KeyboardStop(comm)
+        integrator._check_stop = stop
+        with stop.listening():
+            integrator.run()
         progress.complete_context(integrator)
+    except SimulationStopped:
+        if getattr(comm, 'rank', 0) == 0:
+            print('Simulation stopped by user (q).')
+        raise
     finally:
         progress.stop()

@@ -177,6 +177,7 @@ class BaseDTSIntegrator(BaseIntegrator):
 
         # Sub-iterations
         for it in range(self.sitermax):
+            self._check_stop()
             # Compute dtau
             self._local_dtau()
 
