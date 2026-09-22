@@ -132,6 +132,8 @@ class RichProgressHandler:
             if context is not None and self._interactive else None
         )
         snap = progress_snapshot(intg)
+        self._initial_iteration = getattr(intg, "iter", 0)
+        self._initial_completed = snap["completed"]
         self._sweep_progress = None
         self._sweep_task = None
         if context is not None:
@@ -149,14 +151,18 @@ class RichProgressHandler:
 
         self._progress = Progress(
             TextColumn("[bold]pyBaram[/bold]"),
-            BarColumn(),
+            BarColumn(bar_width=None),
             TaskProgressColumn(),
-            TimeElapsedColumn(),
+            TextColumn("Elapsed [yellow]{task.fields[elapsed]}[/yellow]"),
+            TextColumn("[cyan]{task.fields[rate]}[/cyan] it/s"),
+            TextColumn("ETA [yellow]{task.fields[eta]}[/yellow]"),
+            expand=True,
             console=self._console,
             transient=context is not None,
         )
         self._task = self._progress.add_task(
-            "simulation", total=snap["total"], completed=snap["completed"]
+            "simulation", total=snap["total"], completed=snap["completed"],
+            elapsed="0s", rate="--", eta="estimating",
         )
         self._live = Live(
             self._render(intg),
@@ -233,6 +239,17 @@ class RichProgressHandler:
             status_table.add_row(name, value)
 
         elapsed = perf_counter() - self._start_time
+        iterations = getattr(intg, "iter", 0) - self._initial_iteration
+        self._progress.update(
+            self._task,
+            elapsed=_format_seconds(elapsed),
+            rate="{:.2f}".format(iterations / elapsed)
+            if iterations > 0 and elapsed > 0 else "--",
+            eta=_format_remaining(
+                elapsed, snap["completed"] - self._initial_completed,
+                snap["total"] - self._initial_completed,
+            ) if snap["completed"] < snap["total"] else "0s",
+        )
         if self._context is not None:
             status_table.add_row("current aoa", self._context.current)
             status_table.add_row(
@@ -240,11 +257,6 @@ class RichProgressHandler:
             )
             if self._context.stop_requested:
                 status_table.add_row("stop", "requested after current aoa")
-
-        status_table.add_row("elapsed", _format_seconds(elapsed))
-        status_table.add_row(
-            "remaining", _format_remaining(elapsed, snap["completed"], snap["total"])
-        )
 
         if self._context is None:
             items = [self._progress, status_table]
