@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: pybaram
-Version: 0.13.1
+Version: 0.13.2
 Summary: Compressible CFD solver in Python
 Author-email: Jin Seok Park <jinseok.park@inha.ac.kr>, Namhyoung Kim <knhkse@inha.edu>, Chaewon Jeong <won0407@inha.edu>
 License: BSD 3-Clause License
@@ -88,7 +88,7 @@ MPI, and the compiled scientific dependencies together in one environment:
 
 ```bash
 conda create -n pybaram -c conda-forge \
-  python=3.11 numpy scipy numba h5py mpi4py rich 'argcomplete>=3.6.3,<3.7' pip
+  python=3.12 numpy scipy numba h5py mpi4py rich 'argcomplete>=3.6.3,<3.7' pip
 conda activate pybaram
 ```
 
@@ -99,7 +99,7 @@ python -m pip install \
   https://github.com/seawhanlee/pyBaram/releases/download/v0.10.0/pybaram-0.10.0-py3-none-any.whl
 ```
 
-To use version `0.13.1` from this checkout, create and activate the same Conda
+To use version `0.13.2` from this checkout, create and activate the same Conda
 environment first, then install from source:
 
 ```bash
@@ -289,3 +289,15 @@ See the AUTHORS file.
 License
 ---------
 pyBaram is released under the New BSD License.
+
+Documentation pages use MyST Markdown, PyData Sphinx Theme, and autodoc2.
+Build them with Python 3.11 or newer (development uses Python 3.12):
+
+```bash
+conda activate pybaram-dev
+python -m pip install -e . -r doc/requirements.txt
+make -C doc html SPHINXOPTS="-n -W --keep-going"
+```
+
+Install Graphviz, LaTeX, and dvipng for the diagrams and equation images; see
+the documentation build guide for platform instructions.

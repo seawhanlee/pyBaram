@@ -37,7 +37,7 @@ MPI, and the compiled scientific dependencies together in one environment:
 
 ```bash
 conda create -n pybaram -c conda-forge \
-  python=3.11 numpy scipy numba h5py mpi4py rich 'argcomplete>=3.6.3,<3.7' pip
+  python=3.12 numpy scipy numba h5py mpi4py rich 'argcomplete>=3.6.3,<3.7' pip
 conda activate pybaram
 ```
 
@@ -48,7 +48,7 @@ python -m pip install \
   https://github.com/seawhanlee/pyBaram/releases/download/v0.10.0/pybaram-0.10.0-py3-none-any.whl
 ```
 
-To use version `0.13.1` from this checkout, create and activate the same Conda
+To use version `0.13.2` from this checkout, create and activate the same Conda
 environment first, then install from source:
 
 ```bash
@@ -226,6 +226,18 @@ for the features added here, and the
 [upstream documentation](https://aadl_inha.gitlab.io/pyBaram/) for the original
 project. Documentation build and publishing instructions are included in the
 fork guide.
+
+Documentation pages use MyST Markdown, PyData Sphinx Theme, and autodoc2.
+Build them with Python 3.11 or newer (development uses Python 3.12):
+
+```bash
+conda activate pybaram-dev
+python -m pip install -e . -r doc/requirements.txt
+make -C doc html SPHINXOPTS="-n -W --keep-going"
+```
+
+Install Graphviz, LaTeX, and dvipng for the diagrams and equation images; see
+the documentation build guide for platform instructions.
 
 Reference
 ---------

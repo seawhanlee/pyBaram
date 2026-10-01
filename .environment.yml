@@ -5,16 +5,19 @@ channels:
  - defaults
 
 dependencies:
-  - python>=3.9
+  - python=3.12
   - numpy
   - scipy
   - numba
   - h5py
   - mpi4py
-  - sphinx<9.0
-  - numpydoc
-  - sphinx_rtd_theme
+  - sphinx>=8.2,<9
+  - myst-parser>=5.1,<6
+  - pydata-sphinx-theme>=0.22,<0.23
   - sphinxcontrib-bibtex 
   - sphinx-togglebutton
   - rich
   - argcomplete>=3.6.3,<3.7
+  - pip
+  - pip:
+      - sphinx-autodoc2>=0.5,<0.6

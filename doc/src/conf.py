@@ -8,11 +8,12 @@
 
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
-# documentation root, use os.path.abspath to make it absolute, like shown here.
+# documentation root, resolve it relative to this configuration file.
 #
-import os
+from pathlib import Path
 import sys
-sys.path.insert(0, os.path.abspath('../../'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / '_ext'))
 
 
 # -- Project information -----------------------------------------------------
@@ -32,7 +33,9 @@ release = version
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    'sphinx.ext.autodoc',
+    'myst_parser',
+    'autodoc2',
+    'autodoc2_context',
     'sphinx.ext.imgmath',
     'sphinx.ext.inheritance_diagram',
     'sphinx.ext.graphviz',
@@ -41,8 +44,21 @@ extensions = [
     'sphinx_togglebutton',
 ]
 
-# Add any paths that contain templates here, relative to this directory.
-templates_path = ['_templates']
+# MyST pages and static API analysis.
+source_suffix = {'.md': 'markdown'}
+myst_enable_extensions = ['colon_fence', 'dollarmath', 'substitution', 'deflist']
+myst_substitutions = {'version': version, 'release': release}
+
+# Analyse source without importing solver dependencies. Keep the curated API
+# sections in the guides rather than generating pages for every module.
+autodoc2_packages = [{'path': '../../pybaram', 'auto_mode': False}]
+autodoc2_render_plugin = 'myst'
+# Existing Python docstrings use reStructuredText; new pages use MyST.
+autodoc2_docstring_parser_regexes = [(r'.*', 'rst')]
+autodoc2_hidden_objects = ['dunder', 'private', 'inherited']
+autodoc2_docstrings = 'all'
+autodoc2_class_docstring = 'both'
+autodoc2_module_summary = True
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -62,10 +78,11 @@ inheritance_node_attrs = dict(
 inheritance_edge_attrs = dict(
     penwidth='0.3')
 
-# Inheritance diagrams create links for every discovered base class, including
+# Inheritance diagrams and API base lists reference internal base classes, including
 # internal classes that intentionally do not have standalone API entries.
 nitpick_ignore_regex = [
     ('py:class', r'pybaram\.(?:integrators|solvers|plugins)\..*'),
+    ('py:obj', r'pybaram\.(?:integrators|solvers|plugins)\..*'),
 ]
 
 graphviz_output_format = 'svg'
@@ -79,24 +96,25 @@ viewcode_follow_imported_members = False
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-html_theme = 'sphinx_rtd_theme'
+html_theme = 'pydata_sphinx_theme'
 html_title = 'pyBaram {} (seawhanlee fork)'.format(release)
 html_baseurl = 'https://seawhanlee.github.io/pyBaram/'
 html_context = {
-    'display_github': True,
     'github_user': 'seawhanlee',
     'github_repo': 'pyBaram',
     'github_version': 'main',
-    'conf_py_path': '/doc/src/',
+    'doc_path': 'doc/src',
 }
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ['_static']
-html_css_files = [
-        'css/custom.css',
-    ]
+html_theme_options = {
+    'use_edit_page_button': True,
+    'github_url': 'https://github.com/seawhanlee/pyBaram',
+}
+html_css_files = ['css/custom.css']
 
 # -- Options for LaTeX output --------------------------------------------------
 

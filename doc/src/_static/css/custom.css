@@ -1,3 +1,4 @@
-.wy-nav-content {
-    max-width: 75% !important;
+/* Keep wide API tables and inheritance diagrams readable. */
+.bd-main .bd-content .bd-article-container {
+    max-width: 80rem;
 }
