@@ -36,7 +36,7 @@ extensions = [
     'myst_parser',
     'autodoc2',
     'autodoc2_context',
-    'sphinx.ext.imgmath',
+    'sphinx.ext.mathjax',
     'sphinx.ext.inheritance_diagram',
     'sphinx.ext.graphviz',
     'sphinx.ext.viewcode',
@@ -48,6 +48,12 @@ extensions = [
 source_suffix = {'.md': 'markdown'}
 myst_enable_extensions = ['colon_fence', 'dollarmath', 'substitution', 'deflist']
 myst_substitutions = {'version': version, 'release': release}
+
+# Render LaTeX as theme-aware HTML rather than fixed-color equation images.
+mathjax_path = 'https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js'
+mathjax3_config = {
+    'chtml': {'displayAlign': 'center', 'displayIndent': '0'},
+}
 
 # Analyse source without importing solver dependencies. Keep the curated API
 # sections in the guides rather than generating pages for every module.

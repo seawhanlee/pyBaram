@@ -25,7 +25,10 @@ $e_t$ is the total specific energy. From equation of state,
 specific internal energy can be written as follows.
 
 $$
-e &= \frac{p}{(\gamma -1) \rho} \\ e_t &= e + \frac{1}{2} (u^2 + v^2 + w^2)
+\begin{aligned}
+e &= \frac{p}{(\gamma -1) \rho} \\
+e_t &= e + \frac{1}{2} (u^2 + v^2 + w^2)
+\end{aligned}
 $$
 
 where $p$ is pressure and $\gamma$ is ratio of specific heats.
@@ -39,7 +42,10 @@ $$
 where $h_t$ is total specific enthalpy, which can be defined as follows.
 
 $$
-h &= e + \frac{p}{\rho} \\ h_t &= h + \frac{1}{2} (u^2 + v^2 + w^2)
+\begin{aligned}
+h &= e + \frac{p}{\rho} \\
+h_t &= h + \frac{1}{2} (u^2 + v^2 + w^2)
+\end{aligned}
 $$
 
 ### Navier-Stokes Equations
@@ -53,7 +59,10 @@ $$
 where, $\tau$ is shear stress, which can be written as follows.
 
 $$
-\tau_{xx} &=  2\mu(u_x - \frac{1}{3}(u_x + v_y + w_z)) \\ \tau_{xy} &= \mu(v_x + u_y)
+\begin{aligned}
+\tau_{xx} &=  2\mu(u_x - \frac{1}{3}(u_x + v_y + w_z)) \\
+\tau_{xy} &= \mu(v_x + u_y)
+\end{aligned}
 $$
 
 $\mu$ is viscosity and $u_x$ is derivative of velocity. Other components of the stress tensor are defined analogously. $\Theta$ can be written as follows.
@@ -75,7 +84,10 @@ where, $C_p$ is specific heat at constant pressure, $C_v$ is specific heat at co
 For RANS (Reynolds-averaged Navier-Stokes) equations, the turbulent viscosity is computed using turbulent model equation. `pyBaram` employs the one equation [Spalart-Allmaras model](https://tmbwg.github.io/turbmodels/spalart.html#sa), its [negative variant](https://tmbwg.github.io/turbmodels/spalart.html#saneg), and the two equation [SST model](https://tmbwg.github.io/turbmodels/sst.html). With turbulent viscosity $\mu_t$, shear stress in viscous flux can be modified as follows:
 
 $$
-\tau_{xx} &= 2(\mu+\mu_t)(u_x - \frac{1}{3}(u_x + v_y + w_z)) \\ \tau_{xy} &= (\mu+\mu_t)(v_x + u_y)
+\begin{aligned}
+\tau_{xx} &= 2(\mu+\mu_t)(u_x - \frac{1}{3}(u_x + v_y + w_z)) \\
+\tau_{xy} &= (\mu+\mu_t)(v_x + u_y)
+\end{aligned}
 $$
 
 Turbulent thermal conductivity is computed using turbulent Prandtl number $Pr_t$, thus
@@ -130,7 +142,10 @@ $$
 The source terms are
 
 $$
-\frac{D(\rho k)}{Dt} &= P_k - \beta^* \rho k \omega + \nabla \cdot ((\mu+\sigma_k\mu_t)\nabla k), \\ \frac{D(\rho\omega)}{Dt} &= \frac{\gamma}{\nu_t} P_k - \beta \rho \omega^2 + \nabla \cdot ((\mu+\sigma_\omega\mu_t)\nabla\omega) + 2(1-F_1)\rho\sigma_{\omega 2}   \frac{1}{\omega}\nabla k \cdot \nabla\omega .
+\begin{aligned}
+\frac{D(\rho k)}{Dt} &= P_k - \beta^* \rho k \omega + \nabla \cdot ((\mu+\sigma_k\mu_t)\nabla k), \\
+\frac{D(\rho\omega)}{Dt} &= \frac{\gamma}{\nu_t} P_k - \beta \rho \omega^2 + \nabla \cdot ((\mu+\sigma_\omega\mu_t)\nabla\omega) + 2(1-F_1)\rho\sigma_{\omega 2}   \frac{1}{\omega}\nabla k \cdot \nabla\omega .
+\end{aligned}
 $$
 
 The coefficients $\beta$, $\gamma$, $\sigma_k$, and

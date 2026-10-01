@@ -108,12 +108,17 @@ python -m pip install -r doc/requirements.txt
 make -C doc html SPHINXOPTS="-n -W --keep-going"
 ```
 
-The build requires Graphviz (`dot`) for diagrams and LaTeX plus `dvipng`
-for equation images. On Ubuntu, install them with:
+The HTML build requires Graphviz (`dot`) for diagrams. On Ubuntu, install it with:
 
 ```bash
-sudo apt-get install graphviz texlive-latex-extra dvipng
+sudo apt-get install graphviz
 ```
+
+Equations use LaTeX notation in MyST (`$...$` and `$$...$$`). MathJax 3.2.2
+is loaded from jsDelivr and renders them as HTML that follows the current
+light/dark theme. Multiline equations use LaTeX's `aligned` environment.
+LaTeX and `dvipng` are no longer required for HTML builds; PDF builds still
+require a TeX installation.
 
 Open `doc/build/html/index.html` to preview the result. The Documentation
 GitHub Actions workflow validates pull requests and publishes successful
