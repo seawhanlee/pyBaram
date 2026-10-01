@@ -28,8 +28,9 @@ dynamic = ["version"]
 pybaram = "pybaram.__main__:main"
 
 [project.urls]
-Documentation = "https://aadl_inha.gitlab.io/pyBaram"
-Repository = "https://gitlab.com/aadl_inha/pyBaram.git"
+Documentation = "https://seawhanlee.github.io/pyBaram/"
+Repository = "https://github.com/seawhanlee/pyBaram"
+Upstream = "https://gitlab.com/aadl_inha/pyBaram"
 
 [tool.setuptools]
 packages = [

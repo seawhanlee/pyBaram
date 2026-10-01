@@ -4,3 +4,8 @@
 # Python bytecode caches
 __pycache__/
 *.py[cod]
+
+# Local documentation and package builds
+/doc/build/
+/build/
+/dist/

@@ -5,55 +5,103 @@ Introduction
 Overview
 ========
 
-pyBaram
--------
-pyBaram is an open-source, Python-based software designed to solve compressible flows using the finite volume method on unstructured grids. 'Baram' translates to 'Wind' in Korean. The software supports the simulation of compressible inviscid, laminar, and turbulent flows based on the Reynolds-averaged Navier-Stokes (RANS) models. All the code is written in Python, and hybrid parallel simulations are implemented using high-performance Python packages.
+pyBaram is an open-source Python compressible-flow solver using finite volumes
+on unstructured grids. It supports inviscid, laminar, and turbulent flows,
+including Reynolds-averaged Navier-Stokes (RANS) models and parallel execution.
+
+This documentation describes the
+`seawhanlee/pyBaram fork <https://github.com/seawhanlee/pyBaram>`_ of
+`aadl_inha/pyBaram <https://gitlab.com/aadl_inha/pyBaram>`_. See
+:doc:`fork_additions` for fork-specific features and the
+`upstream documentation <https://aadl_inha.gitlab.io/pyBaram/>`_ for the original
+project.
 
 *************
 Installation
 *************
 
-pyBaram |version| can be obtained from the `repository <https://gitlab.com/aadl_inha/PyBaram>`_.
-Currently, ``pyBaram`` supports Linux systems, Windows, and macOS, provided that the required third-party shared libraries are available for the target platform.
+pyBaram |version| requires Python 3.9 or newer. Linux, Windows, and macOS can
+be used when the necessary third-party shared libraries are available. Shell
+completion described below is supported for Bash and Zsh on Linux and macOS.
 
-Quick start
-===========
-With `Anaconda <https://www.anaconda.com/>`_ (or `Miniconda <https://docs.conda.io/en/latest/miniconda.html>`_) Python distribution, you can readily install pyBaram.
+Quick start with Conda
+======================
 
-1. Make a new environment and activate it::
+Conda is recommended because it installs MPI and the compiled scientific
+packages together. Create and activate an environment:
 
-    user@Computer ~/pyBaram$ conda create -n pybaram python=3.9
-    user@Computer ~/pyBaram$ conda activate pybaram
+.. code-block:: bash
 
-2. Install Python packages::
+   conda create -n pybaram -c conda-forge python=3.11 numpy scipy numba h5py mpi4py rich 'argcomplete>=3.6.3,<3.7' pip
+   conda activate pybaram
 
-    user@Computer ~/pyBaram$ conda install numpy scipy numba mpi4py metis
-    user@Computer ~/pyBaram$ conda install -c conda-forge h5py cgns
+For CGNS mesh import and MPI mesh partitioning, also install the native libraries:
 
-3. Download a release version of ``pyBaram`` from the `release page <https://gitlab.com/aadl_inha/PyBaram/-/releases>`_ and install it::
+.. code-block:: bash
 
-    user@Computer ~/pyBaram$ pip install pybaram-0.X.Y-py3-none-any.whl
+   conda install -c conda-forge cgns metis
 
+Install from this fork's source:
 
-Install from source
-===================
-You can install pyBaram directly from source using ``setup.py``::
+.. code-block:: bash
 
-    user@Computer ~/pyBaram$ pip install .
+   git clone https://github.com/seawhanlee/pyBaram.git
+   cd pyBaram
+   python -m pip install .
+   pybaram --help
 
-It is recommended to use ``virtualenv`` or ``conda`` to create a separate environment.
+For editable development, use ``python -m pip install -e .`` instead.
+Installation installs the Python dependencies declared in ``pyproject.toml``;
+it does not modify your shell configuration.
+
+Install a release wheel
+=======================
+
+Download an available wheel from the
+`fork's GitHub releases <https://github.com/seawhanlee/pyBaram/releases>`_,
+then install that downloaded file in the activated environment:
+
+.. code-block:: bash
+
+   python -m pip install /path/to/downloaded/pybaram-X.Y.Z-py3-none-any.whl
+
+Replace ``X.Y.Z`` with the downloaded release version. Source installation
+provides the current checkout; a previously published wheel may have fewer
+features. Installing through pip also installs ``rich`` and ``argcomplete``.
+
+Pip-only environments
+=====================
+
+A Python virtual environment can also be used. Install an MPI runtime and its
+development libraries through your operating system first so ``mpi4py`` can
+build or load. For example, on Ubuntu:
+
+.. code-block:: bash
+
+   sudo apt-get install build-essential libopenmpi-dev openmpi-bin python3-venv
+   python3 -m venv .venv
+   source .venv/bin/activate
+   python -m pip install .
+
+Run these commands from a checkout of this fork. CGNS and METIS shared
+libraries still need to be installed separately when those features are used.
 
 Dependencies
-------------
-pyBaram |version| requires Python 3.9 or newer and the following Python
-packages:
+============
 
-1. `numpy` >= 1.10
-2. `numba` >= 0.5
-3. `scipy` >= 1.6
-4. `h5py` >= 2.6
-5. `mpi4py` >= 2.0
-6. `rich` >= 13.0
+The required Python packages are:
+
+* ``numpy >= 1.10``
+* ``numba >= 0.5``
+* ``scipy >= 1.6``
+* ``h5py >= 2.6``
+* ``mpi4py >= 2.0``
+* ``rich >= 13.0``: the fork's inline terminal progress display.
+* ``argcomplete >= 3.6.3, < 3.7``: the fork's Bash and Zsh completion.
+
+The last two packages support this fork's CLI additions. They are required
+package dependencies, including when progress output is disabled. Document
+building has separate dependencies; see :doc:`fork_additions`.
 
 Optional Python packages
 ^^^^^^^^^^^^^^^^^^^^^^^^
@@ -112,3 +160,59 @@ CUDA support
 
 The optional CUDA backend requires an NVIDIA CUDA-capable GPU and a CUDA driver
 supported by the installed version of Numba.
+
+.. _shell-completion:
+
+Shell completion
+================
+
+After installation, activate the environment containing ``pybaram`` and
+``register-python-argcomplete``. Register completion in your current Bash shell:
+
+.. code-block:: bash
+
+   conda activate pybaram
+   eval "$(register-python-argcomplete --no-defaults pybaram)"
+
+For Zsh, initialize its completion system first unless your shell configuration
+already does so:
+
+.. code-block:: zsh
+
+   conda activate pybaram
+   autoload -Uz compinit
+   compinit
+   eval "$(register-python-argcomplete --no-defaults pybaram)"
+
+For persistent registration, add the registration line to ``~/.bashrc`` or
+``~/.zshrc`` after your environment activation and, for Zsh, after ``compinit``.
+If you activate the environment manually after starting a shell, register
+completion afterward. pyBaram installation does not edit these files.
+
+Examples of Tab completion:
+
+.. code-block:: text
+
+   pybaram re<Tab>                                   # restart
+   pybaram run mesh.pbrm config.ini --backend c<Tab>  # cpu or cuda
+   pybaram run mesh.pbrm conf<Tab>                    # .ini files/directories
+   pybaram sweep mesh.pbrm config.ini --out study<Tab> # directories
+
+Completion suggests commands, flags, choices, and paths. Input suggestions
+are filtered by file type; output filenames can be entered freely. Numeric
+values and surface names have no value suggestions. Completion does not read
+mesh contents or start simulations. Registration targets the ``pybaram`` command
+on ``PATH``; it does not register ``python -m pybaram`` or MPI launcher commands.
+
+If completion is unavailable, check the active commands and register again:
+
+.. code-block:: bash
+
+   command -v pybaram
+   command -v register-python-argcomplete
+   python -m pip show argcomplete
+   eval "$(register-python-argcomplete --no-defaults pybaram)"
+
+Both commands should belong to your active Python environment. Confirm that
+registration succeeds, that Zsh's ``compinit`` ran first, and that you are
+using the ``pybaram`` command directly.

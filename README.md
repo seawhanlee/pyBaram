@@ -30,14 +30,14 @@ pyBaram is an open-source, Python-based software designed to solve compressible 
 Installation
 ------------
 pyBaram requires Python 3.9 or newer. It depends on scientific Python packages
-including `numpy`, `scipy`, `numba`, `h5py`, `mpi4py`, and `rich`.
+including `numpy`, `scipy`, `numba`, `h5py`, `mpi4py`, `rich`, and `argcomplete`.
 
 The recommended installation method is Conda because it can install Python,
 MPI, and the compiled scientific dependencies together in one environment:
 
 ```bash
 conda create -n pybaram -c conda-forge \
-  python=3.11 numpy scipy numba h5py mpi4py rich pip
+  python=3.11 numpy scipy numba h5py mpi4py rich 'argcomplete>=3.6.3,<3.7' pip
 conda activate pybaram
 ```
 
@@ -48,7 +48,7 @@ python -m pip install \
   https://github.com/seawhanlee/pyBaram/releases/download/v0.10.0/pybaram-0.10.0-py3-none-any.whl
 ```
 
-To use version `0.13.0` from this checkout, create and activate the same Conda
+To use version `0.13.1` from this checkout, create and activate the same Conda
 environment first, then install from source:
 
 ```bash
@@ -219,7 +219,13 @@ Examples of using pyBaram are available in the examples directory. Currently ava
 
 Documentation
 -------------
-Information on the installation, usage, and implementation of pyBaram can be found in the [documentation](https://aadl_inha.gitlab.io/pyBaram/).
+Information on installation, usage, and implementation is available in this
+fork's [GitHub Pages documentation](https://seawhanlee.github.io/pyBaram/).
+See [Fork additions](https://seawhanlee.github.io/pyBaram/fork_additions.html)
+for the features added here, and the
+[upstream documentation](https://aadl_inha.gitlab.io/pyBaram/) for the original
+project. Documentation build and publishing instructions are included in the
+fork guide.
 
 Reference
 ---------

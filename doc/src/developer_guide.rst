@@ -648,7 +648,7 @@ When the wrapper is called, it appends any runtime arguments, resolves
 ``ArrayBank`` objects to their active arrays, and invokes the compiled CPU or
 CUDA kernel.
 
-.. autoclass:: pybaram.solvers.euler.inters.BaseAdvecIntInters
+.. autoclass:: pybaram.solvers.baseadvec.inters.BaseAdvecIntInters
 
   .. method:: construct_kernels
 

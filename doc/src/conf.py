@@ -70,12 +70,25 @@ nitpick_ignore_regex = [
 
 graphviz_output_format = 'svg'
 
+# Document classes at their defining modules so imported aliases do not
+# overwrite the source viewer's links back to the API reference.
+viewcode_follow_imported_members = False
+
 # -- Options for HTML output -------------------------------------------------
 
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
 html_theme = 'sphinx_rtd_theme'
+html_title = 'pyBaram {} (seawhanlee fork)'.format(release)
+html_baseurl = 'https://seawhanlee.github.io/pyBaram/'
+html_context = {
+    'display_github': True,
+    'github_user': 'seawhanlee',
+    'github_repo': 'pyBaram',
+    'github_version': 'main',
+    'conf_py_path': '/doc/src/',
+}
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,

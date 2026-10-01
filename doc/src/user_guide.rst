@@ -79,6 +79,13 @@ When you run ``pybaram``, following help output is given::
    AOA for sweeps), without live terminal control sequences. The old ``tui`` and
    ``tqdm`` values are no longer accepted; use ``rich`` or omit the option.
 
+   The display also shows elapsed time, iteration rate, and ETA. See
+   :doc:`fork_additions` for details on progress and keyboard cancellation.
+   Press ``q`` to stop at the next iteration boundary across all MPI ranks
+   (or ``q`` followed by Enter when an MPI launcher buffers input). Existing
+   output is retained; no new solution checkpoint is forced by cancellation.
+   For command and path completion, see :ref:`shell-completion`.
+
    The CPU backend is used by default. Select the CUDA backend with ``-b cuda``
    (or ``--backend cuda``)::
 
