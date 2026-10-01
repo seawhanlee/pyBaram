@@ -278,18 +278,6 @@ for the features added here, and the
 project. Documentation build and publishing instructions are included in the
 fork guide.
 
-Reference
----------
-[pyBaram: Parallel compressible flow solver in high-performance Python for teaching and research, SoftwareX, 2022](https://doi.org/10.1016/j.softx.2022.101272)
-
-Authors
---------
-See the AUTHORS file.
-
-License
----------
-pyBaram is released under the New BSD License.
-
 Documentation pages use MyST Markdown, PyData Sphinx Theme, and autodoc2.
 Build them with Python 3.11 or newer (development uses Python 3.12):
 
@@ -301,3 +289,15 @@ make -C doc html SPHINXOPTS="-n -W --keep-going"
 
 Install Graphviz, LaTeX, and dvipng for the diagrams and equation images; see
 the documentation build guide for platform instructions.
+
+Reference
+---------
+[pyBaram: Parallel compressible flow solver in high-performance Python for teaching and research, SoftwareX, 2022](https://doi.org/10.1016/j.softx.2022.101272)
+
+Authors
+--------
+See the AUTHORS file.
+
+License
+---------
+pyBaram is released under the New BSD License.
