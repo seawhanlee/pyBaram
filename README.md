@@ -48,7 +48,7 @@ python -m pip install \
   https://github.com/seawhanlee/pyBaram/releases/download/v0.10.0/pybaram-0.10.0-py3-none-any.whl
 ```
 
-To use version `0.13.6` from this checkout, create and activate the same Conda
+To use version `0.13.7` from this checkout, create and activate the same Conda
 environment first, then install from source:
 
 ```bash
