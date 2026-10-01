@@ -113,7 +113,7 @@ html_static_path = ['_static']
 templates_path = ['_templates']
 html_sidebars = {
     '**': ['sidebar-brand', 'search-button-field', 'sidebar-controls',
-           'sidebar-site-nav', 'page-toc', 'edit-this-page', 'sourcelink'],
+           'sidebar-site-nav', 'edit-this-page', 'sourcelink'],
 }
 # Keep the page outline focused on guide headings rather than every API member.
 toc_object_entries = False
@@ -124,7 +124,7 @@ html_theme_options = {
     'navbar_center': [],
     'navbar_end': [],
     'navbar_persistent': [],
-    'secondary_sidebar_items': [],
+    'secondary_sidebar_items': ['page-toc'],
     'primary_sidebar_end': [],
     'navigation_depth': 2,
     'show_toc_level': 2,

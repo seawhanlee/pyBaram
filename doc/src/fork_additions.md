@@ -127,9 +127,10 @@ only required when generating documentation, not when using the solver.
 
 Write pages as MyST Markdown in `doc/src/*.md`. MyST supports Sphinx
 cross-references, fenced directives, equations, tables, and bibliography
-citations. The left sidebar contains site navigation, the page outline, search,
-light/dark appearance, and links to edit each page on GitHub. On narrow
-screens, use the menu button to open the sidebar.
+citations. The left sidebar contains site navigation, search, light/dark
+appearance, and links to edit each page on GitHub. The right sidebar contains
+the "On this page" outline. On narrow screens, use the left menu button for
+site navigation and the right outline button for the current page's headings.
 
 API references are placed in the guides with `autodoc2-object`, for example:
 

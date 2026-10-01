@@ -39,11 +39,7 @@ html {
     padding: 0;
 }
 
-.bd-sidebar-primary .page-toc {
-    font-size: 0.9rem;
-}
-
-@media (min-width: 992px) {
+@media (min-width: 960px) {
     .bd-sidebar-primary {
         flex-basis: 19rem;
         width: 19rem;
@@ -54,12 +50,32 @@ html {
     }
 }
 
-@media (max-width: 991px) {
+@media (max-width: 959.98px) {
     .pst-navbar-icon.pybaram-menu-toggle {
         background: var(--pst-color-background);
         border: 1px solid var(--pst-color-border);
         border-radius: 0.4rem;
         left: 0.5rem;
+        position: fixed;
+        top: 0.5rem;
+        z-index: 1030;
+        height: 2.5rem;
+        width: 2.5rem;
+    }
+}
+
+@media (min-width: 1200px) {
+    .pst-navbar-icon.pybaram-toc-toggle {
+        display: none;
+    }
+}
+
+@media (max-width: 1199.98px) {
+    .pst-navbar-icon.pybaram-toc-toggle {
+        background: var(--pst-color-background);
+        border: 1px solid var(--pst-color-border);
+        border-radius: 0.4rem;
+        right: 0.5rem;
         position: fixed;
         top: 0.5rem;
         z-index: 1030;
