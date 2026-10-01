@@ -48,7 +48,7 @@ python -m pip install \
   https://github.com/seawhanlee/pyBaram/releases/download/v0.10.0/pybaram-0.10.0-py3-none-any.whl
 ```
 
-To use version `0.12.1` from this checkout, create and activate the same Conda
+To use version `0.13.0` from this checkout, create and activate the same Conda
 environment first, then install from source:
 
 ```bash
@@ -72,6 +72,47 @@ Verify the command-line entry point:
 ```bash
 pybaram --help
 ```
+
+Shell completion
+----------------
+Bash and Zsh completion is included through `argcomplete`. After installing
+pyBaram and activating its Python environment, register completion in the
+current shell:
+
+```bash
+eval "$(register-python-argcomplete --no-defaults pybaram)"
+```
+
+For Zsh, initialize its completion system first if your shell configuration
+does not already do so:
+
+```zsh
+autoload -Uz compinit
+compinit
+eval "$(register-python-argcomplete --no-defaults pybaram)"
+```
+
+To enable completion in future sessions, add the registration line to
+`~/.bashrc` or `~/.zshrc`, after environment activation (and after `compinit`
+for Zsh). If you activate the environment manually, run registration afterward.
+Installation does not modify shell configuration files.
+
+Press Tab to complete commands, flags, choices, and paths, for example:
+
+```text
+pybaram re<Tab>                          # restart
+pybaram run mesh.pbrm config.ini --backend c<Tab>  # cpu or cuda
+pybaram run mesh.pbrm conf<Tab>           # .ini files and directories
+pybaram sweep mesh.pbrm config.ini --out study<Tab>  # directories
+```
+
+Input suggestions are filtered by file type; output filenames can still be
+typed freely. Numeric values and surface names have no value suggestions.
+Completion does not read mesh contents or start simulations. Registration
+targets the `pybaram` command on PATH; it does not register `python -m pybaram`
+or MPI launcher commands. If completion is unavailable, check that `pybaram`
+and `register-python-argcomplete` belong to the active environment, then
+register again. Bash and Zsh on Linux and macOS are supported.
 
 Progress display
 ----------------

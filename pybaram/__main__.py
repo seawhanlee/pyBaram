@@ -1,5 +1,11 @@
 # -*- coding: utf-8 -*-
+# PYTHON_ARGCOMPLETE_OK
 from argparse import ArgumentParser
+
+import argcomplete
+from argcomplete.completers import (
+    DirectoriesCompleter, FilesCompleter, SuppressCompleter
+)
 
 
 def process_import(args):
@@ -78,6 +84,11 @@ def process_sweep(args):
 
 
 def build_parser():
+    mesh_files = FilesCompleter(('.pbrm', '.pbrmc'))
+    solution_files = FilesCompleter('.pbrs')
+    config_files = FilesCompleter('.ini')
+    output_files = FilesCompleter()
+    no_values = SuppressCompleter()
     ap = ArgumentParser(prog='pybaram')
     sp = ap.add_subparsers(dest='cmd', help='sub-command help')
 
@@ -86,12 +97,14 @@ def build_parser():
 
     # Import command
     ap_import = sp.add_parser('import', help='import --help')
-    ap_import.add_argument('inmesh', help='input mesh file')
+    ap_import.add_argument(
+        'inmesh', help='input mesh file'
+    ).completer = FilesCompleter(('.msh', '.cgns', '.pbrm', '.pbrmc'))
     ap_import.add_argument(
         'outmesh', help='output mesh file (.pbrm: RCM, .pbrmc: coloring)'
-    )
+    ).completer = output_files
     ap_import.add_argument('-s', '--scale', type=float, default=1,
-                           help='scale mesh')
+                           help='scale mesh').completer = no_values
     ap_import.add_argument(
         '-c', '--coloring-method',
         choices=('greedy', 'smallest-last'),
@@ -102,10 +115,14 @@ def build_parser():
 
     # Partition command
     ap_part = sp.add_parser('partition', help='partition --help')
-    ap_part.add_argument('npart', help='number of partition')
-    ap_part.add_argument('mesh', help='mesh file')
-    ap_part.add_argument('soln', nargs='*', type=str, help='solution file')
-    ap_part.add_argument('out', help='partitioned mesh file')
+    ap_part.add_argument('npart', help='number of partition').completer = no_values
+    ap_part.add_argument('mesh', help='mesh file').completer = mesh_files
+    ap_part.add_argument(
+        'soln', nargs='*', type=str, help='solution file'
+    ).completer = solution_files
+    ap_part.add_argument(
+        'out', help='partitioned mesh file'
+    ).completer = output_files
     ap_part.add_argument(
         '-c', '--coloring-method',
         choices=('greedy', 'smallest-last'),
@@ -116,8 +133,8 @@ def build_parser():
 
     # Run command
     ap_run = sp.add_parser('run', help='run --help')
-    ap_run.add_argument('mesh', type=str, help='mesh file')
-    ap_run.add_argument('ini', type=str, help='config file')
+    ap_run.add_argument('mesh', type=str, help='mesh file').completer = mesh_files
+    ap_run.add_argument('ini', type=str, help='config file').completer = config_files
     ap_run.add_argument(
         '--ui',
         choices=('rich', 'none'),
@@ -135,9 +152,13 @@ def build_parser():
 
     # Run restart
     ap_restart = sp.add_parser('restart', help='run --help')
-    ap_restart.add_argument('mesh', type=str, help='mesh file')
-    ap_restart.add_argument('soln', type=str, help='solution file')
-    ap_restart.add_argument('ini', nargs='?', type=str, help='config file')
+    ap_restart.add_argument('mesh', type=str, help='mesh file').completer = mesh_files
+    ap_restart.add_argument(
+        'soln', type=str, help='solution file'
+    ).completer = solution_files
+    ap_restart.add_argument(
+        'ini', nargs='?', type=str, help='config file'
+    ).completer = config_files
     ap_restart.add_argument(
         '--ui',
         choices=('rich', 'none'),
@@ -155,25 +176,27 @@ def build_parser():
 
     # AOA sweep command
     ap_sweep = sp.add_parser('sweep', help='sweep --help')
-    ap_sweep.add_argument('mesh', type=str, help='mesh file')
-    ap_sweep.add_argument('ini', type=str, help='base config file')
+    ap_sweep.add_argument('mesh', type=str, help='mesh file').completer = mesh_files
+    ap_sweep.add_argument(
+        'ini', type=str, help='base config file'
+    ).completer = config_files
     sweep_values = ap_sweep.add_mutually_exclusive_group(required=True)
     sweep_values.add_argument(
         '--aoa',
         type=str,
         help='comma-separated AOA values in degrees, e.g. 0,2,4'
-    )
+    ).completer = no_values
     sweep_values.add_argument(
         '--aoa-range',
         nargs=3,
         metavar=('START', 'STOP', 'STEP'),
         help='AOA range in degrees, inclusive of STOP when it lands on STEP'
-    )
+    ).completer = no_values
     ap_sweep.add_argument(
         '-o', '--out',
         default='sweep-aoa',
         help='output directory for sweep cases'
-    )
+    ).completer = DirectoriesCompleter()
     ap_sweep.add_argument(
         '--ui',
         choices=('rich', 'none'),
@@ -195,9 +218,13 @@ def build_parser():
 
     # Export command
     ap_export = sp.add_parser('export', help='export --help')
-    ap_export.add_argument('mesh', help='mesh file')
-    ap_export.add_argument('soln', nargs='?', help='solution file')
-    ap_export.add_argument('out', nargs='?', help='output file')
+    ap_export.add_argument('mesh', help='mesh file').completer = mesh_files
+    ap_export.add_argument(
+        'soln', nargs='?', help='solution file'
+    ).completer = solution_files
+    ap_export.add_argument(
+        'out', nargs='?', help='output file'
+    ).completer = output_files
     ap_export.set_defaults(process=process_export)
 
     # surface option
@@ -205,7 +232,7 @@ def build_parser():
         "-s", "--surface",
         type=str,
         help='Export surface data by boundary name; use commas to specify multiple boundaries (e.g., wall or wall,inlet)'
-    )
+    ).completer = no_values
 
     ap_export.add_argument(
         "--list-surfaces",
@@ -218,6 +245,7 @@ def build_parser():
 
 def main(argv=None):
     ap = build_parser()
+    argcomplete.autocomplete(ap)
 
     # Parse the arguments
     args = ap.parse_args(argv)

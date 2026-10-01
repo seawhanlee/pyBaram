@@ -119,6 +119,7 @@ pybaram/writers/teciowrapper.py
 pybaram/writers/tecplot.py
 pybaram/writers/vtk.py
 tests/test_cli.py
+tests/test_completion.py
 tests/test_progress.py
 tests/test_simulation.py
 tests/test_stop.py
