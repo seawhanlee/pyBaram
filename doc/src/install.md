@@ -1,5 +1,6 @@
-# Introduction
+# Installation
 
+(introduction)=
 ## Overview
 
 pyBaram is an open-source Python compressible-flow solver using finite volumes
@@ -13,7 +14,6 @@ This documentation describes the
 [upstream documentation](https://aadl_inha.gitlab.io/pyBaram/) for the original
 project.
 
-# Installation
 
 pyBaram {{ version }} requires Python 3.9 or newer. Linux, Windows, and macOS can
 be used when the necessary third-party shared libraries are available. Shell

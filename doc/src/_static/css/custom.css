@@ -1,4 +1,73 @@
-/* Keep wide API tables and inheritance diagrams readable. */
+html {
+    --pst-header-height: 0px;
+    --pst-header-article-height: 2rem;
+}
+
+.bd-header[hidden] {
+    display: none;
+}
+
+.bd-page-width {
+    max-width: 100%;
+}
+
 .bd-main .bd-content .bd-article-container {
     max-width: 80rem;
+}
+
+.pybaram-brand {
+    color: var(--pst-color-text-base);
+    font-size: 1.6rem;
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.pybaram-version {
+    color: var(--pst-color-text-muted);
+    font-size: 0.85rem;
+    margin: 0.25rem 0 0;
+}
+
+.pybaram-sidebar-controls {
+    align-items: center;
+    display: flex;
+    gap: 1rem;
+}
+
+.pybaram-sidebar-controls .navbar-icon-links {
+    margin: 0;
+    padding: 0;
+}
+
+.bd-sidebar-primary .page-toc {
+    font-size: 0.9rem;
+}
+
+@media (min-width: 992px) {
+    .bd-sidebar-primary {
+        flex-basis: 19rem;
+        width: 19rem;
+    }
+
+    .pst-navbar-icon.pybaram-menu-toggle {
+        display: none;
+    }
+}
+
+@media (max-width: 991px) {
+    .pst-navbar-icon.pybaram-menu-toggle {
+        background: var(--pst-color-background);
+        border: 1px solid var(--pst-color-border);
+        border-radius: 0.4rem;
+        left: 0.5rem;
+        position: fixed;
+        top: 0.5rem;
+        z-index: 1030;
+        height: 2.5rem;
+        width: 2.5rem;
+    }
+
+    .bd-header-article {
+        padding-top: 3rem;
+    }
 }

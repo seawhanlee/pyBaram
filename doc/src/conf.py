@@ -52,7 +52,7 @@ myst_substitutions = {'version': version, 'release': release}
 # Analyse source without importing solver dependencies. Keep the curated API
 # sections in the guides rather than generating pages for every module.
 autodoc2_packages = [{'path': '../../pybaram', 'auto_mode': False}]
-autodoc2_render_plugin = 'myst'
+autodoc2_render_plugin = 'autodoc2_context.InlineMystRenderer'
 # Existing Python docstrings use reStructuredText; new pages use MyST.
 autodoc2_docstring_parser_regexes = [(r'.*', 'rst')]
 autodoc2_hidden_objects = ['dunder', 'private', 'inherited']
@@ -110,9 +110,24 @@ html_context = {
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ['_static']
+templates_path = ['_templates']
+html_sidebars = {
+    '**': ['sidebar-brand', 'search-button-field', 'sidebar-controls',
+           'sidebar-site-nav', 'page-toc', 'edit-this-page', 'sourcelink'],
+}
+# Keep the page outline focused on guide headings rather than every API member.
+toc_object_entries = False
 html_theme_options = {
     'use_edit_page_button': True,
     'github_url': 'https://github.com/seawhanlee/pyBaram',
+    'navbar_start': [],
+    'navbar_center': [],
+    'navbar_end': [],
+    'navbar_persistent': [],
+    'secondary_sidebar_items': [],
+    'primary_sidebar_end': [],
+    'navigation_depth': 2,
+    'show_toc_level': 2,
 }
 html_css_files = ['css/custom.css']
 

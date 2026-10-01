@@ -2,6 +2,37 @@
 
 from autodoc2.sphinx.autodoc import AutodocObject
 from autodoc2.sphinx.utils import get_database
+from autodoc2.render.myst_ import MystRenderer
+
+
+class InlineMystRenderer(MystRenderer):
+    """Render module APIs inside the guide's current section."""
+
+    def render_module(self, item):
+        full_name = item['full_name']
+        yield f'```{{py:module}} {full_name}'
+        if self.no_index(item):
+            yield ':noindex:'
+        yield '```'
+        yield ''
+        if self.show_docstring(item):
+            yield f'```{{autodoc2-docstring}} {full_name}'
+            if parser := self.get_doc_parser(full_name):
+                yield f':parser: {parser}'
+            yield '```'
+            yield ''
+
+        children = [child for child in self.get_children(item)
+                    if child['type'] not in ('module', 'package')]
+        if children and self.show_module_summary(item):
+            yield from self.generate_summary(
+                children,
+                alias={child['full_name']: child['full_name'].split('.')[-1]
+                       for child in children},
+            )
+            yield ''
+        for child in children:
+            yield from self.render_item(child['full_name'])
 
 
 class InlineAutodocObject(AutodocObject):

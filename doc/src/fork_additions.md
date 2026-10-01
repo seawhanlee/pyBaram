@@ -127,8 +127,9 @@ only required when generating documentation, not when using the solver.
 
 Write pages as MyST Markdown in `doc/src/*.md`. MyST supports Sphinx
 cross-references, fenced directives, equations, tables, and bibliography
-citations. The PyData theme provides search, light/dark appearance, and links
-to edit each page on GitHub.
+citations. The left sidebar contains site navigation, the page outline, search,
+light/dark appearance, and links to edit each page on GitHub. On narrow
+screens, use the menu button to open the sidebar.
 
 API references are placed in the guides with `autodoc2-object`, for example:
 
@@ -146,6 +147,7 @@ automatic generation of a page for every module is disabled.
 
 The local `doc/_ext/autodoc2_context.py` extension corrects autodoc2 0.5's
 inline class context so API anchors and source links keep their existing
-addresses. Run its regression check with
+addresses. Its MyST renderer keeps module API blocks inside the surrounding
+guide section instead of creating new top-level pages within the document. Run its regression check with
 `python -m unittest discover -s doc/tests -v`; the documentation workflow
 runs this check before building the site.

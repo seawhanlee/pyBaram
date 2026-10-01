@@ -1,0 +1,10 @@
+{% extends "!layout.html" %}
+{% block docs_navbar %}
+  {# The theme's TOC observer reads this element's height; no visible header. #}
+  <div id="pst-header" class="bd-header" hidden></div>
+  <button type="button"
+          class="pst-navbar-icon sidebar-toggle primary-toggle pybaram-menu-toggle"
+          aria-label="Site navigation">
+    <i class="fa-solid fa-bars" aria-hidden="true"></i>
+  </button>
+{% endblock %}
