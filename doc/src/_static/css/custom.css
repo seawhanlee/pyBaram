@@ -87,3 +87,10 @@ html {
         padding-top: 3rem;
     }
 }
+
+/* Hidden API definitions can retain their intrinsic size at height: 0. */
+@media screen {
+    .admonition.toggle-hidden > .admonition-title ~ * {
+        display: none;
+    }
+}
