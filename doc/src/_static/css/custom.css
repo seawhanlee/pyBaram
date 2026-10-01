@@ -94,3 +94,8 @@ html {
         display: none;
     }
 }
+
+/* Match API member spacing to the surrounding paragraphs inside dropdowns. */
+.bd-content .admonition.dropdown dl.py {
+    margin-bottom: 1rem;
+}
