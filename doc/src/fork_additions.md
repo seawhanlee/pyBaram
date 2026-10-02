@@ -94,8 +94,12 @@ that each tag matches the package version. Available wheels are listed on the
 ## Building and publishing documentation
 
 The documentation uses Sphinx, MyST-Parser (Markdown), PyData Sphinx Theme,
-and sphinx-autodoc2 for API references. Documentation builds require Python
-3.11 or newer; Python 3.12 is recommended for development. The solver itself
+and sphinx-autodoc2 for API references. Code blocks have a copy button in the
+upper-right corner, provided by sphinx-copybutton. Clicking it copies the entire
+block and displays a success indicator. Internal whitespace and line breaks are
+preserved; the final newline is omitted to avoid automatically executing a pasted
+command. Documentation builds require Python 3.11 or newer; Python 3.12 is
+recommended for development. The solver itself
 continues to support Python 3.9 or newer.
 
 Install the solver as described in {doc}`install`, then install the documentation

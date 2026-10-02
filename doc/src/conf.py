@@ -42,6 +42,7 @@ extensions = [
     'sphinx.ext.viewcode',
     'sphinxcontrib.bibtex',
     'sphinx_togglebutton',
+    'sphinx_copybutton',
 ]
 
 # MyST pages and static API analysis.

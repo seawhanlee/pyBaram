@@ -135,14 +135,14 @@ path can be extended with the `PYBARAM_LIB_PATH` environment variable. Use
 
 For example, on Linux or macOS:
 
-```
-user@Computer ~/pyBaram$ export PYBARAM_LIB_PATH=/path/to/cgns/lib:/path/to/metis/lib
+```bash
+export PYBARAM_LIB_PATH=/path/to/cgns/lib:/path/to/metis/lib
 ```
 
 On Windows:
 
-```
-C:\> set PYBARAM_LIB_PATH=C:\path\to\cgns\bin;C:\path\to\metis\bin
+```bat
+set PYBARAM_LIB_PATH=C:\path\to\cgns\bin;C:\path\to\metis\bin
 ```
 
 When running inside a conda environment, `pyBaram` also searches common conda
